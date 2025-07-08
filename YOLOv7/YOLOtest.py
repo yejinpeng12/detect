@@ -283,7 +283,7 @@ dataloader = DataLoader(
             shuffle=True,
             num_workers=0,
             pin_memory=True,
-            collate_fn=collate_fn  # 处理变长标签
+            collate_fn=collate_fn
         )
 
 for epoch in range(100):
