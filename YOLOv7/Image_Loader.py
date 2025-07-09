@@ -47,7 +47,6 @@ class Loader(Dataset):
         self.transform = transform
         self.image_files = os.listdir(image_ir_dir)
         self.to_tensor = torchvision.transforms.ToTensor()
-        self.resize = torchvision.transforms.Resize((640,640))
     def __len__(self):
         return len(self.image_files)
     def __getitem__(self,index):

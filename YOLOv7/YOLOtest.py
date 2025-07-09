@@ -4,7 +4,7 @@ import torch
 from torch.amp import autocast,GradScaler
 from Image_Loader import DataLoader,Loader,collate_fn
 from basebone.ELANNet import ELANNet
-from neck.SPP.SPPF import SPPF
+from neck.SPP.SPPBlockCSP import SPPFBlockCSP
 from neck.PaFPN.PaFPN import YOLOv7PaFPN
 from DecoupledHead.DecoupledHead import DecoupledHead
 from loss import Criterion
@@ -17,7 +17,8 @@ class YOLO(nn.Module):
                  confidence_thresh=0.01,
                  nms_thresh=0.5,
                  topk=100,
-                 trainable=False,):
+                 trainable=False,
+                 depthwise = False):
         super().__init__()
         self.stride = [8,16,32]
         self.device = device
@@ -27,16 +28,16 @@ class YOLO(nn.Module):
         self.topk = topk
         self.trainable = trainable
         #主干网络
-        self.backbone = ELANNet()
+        self.backbone = ELANNet(depthwise=depthwise)
         self.neck_dims = self.backbone.feat_dim[-3:]
         #颈部网络
-        self.neck = SPPF(in_dim=self.neck_dims[-1],out_dim=self.neck_dims[-1]//2)
-        self.neck_dims[-1] = self.neck.out_dim
+        self.neck = SPPFBlockCSP(in_dim=self.neck_dims[-1],out_dim=self.neck_dims[-1]//2,depthwise=depthwise)
+        self.neck_dims[-1] = self.neck_dims[-1]//2
         #颈部网络：特征金字塔
-        self.fpn = YOLOv7PaFPN(self.neck_dims,None)
+        self.fpn = YOLOv7PaFPN(self.neck_dims,None,depthwise=depthwise)
         self.head_dims = self.fpn.out_dim
         #检测头
-        self.head = nn.ModuleList([DecoupledHead(head_dim,head_dim,num_classes=self.num_classes)
+        self.head = nn.ModuleList([DecoupledHead(head_dim,head_dim,num_classes=self.num_classes,depthwise=depthwise)
                                   for head_dim in self.head_dims])
 
         #预测层
@@ -266,10 +267,13 @@ class YOLO(nn.Module):
 
         return scores,labels,bboxes
 
-model = YOLO(trainable=True).cuda()
+model = YOLO(trainable=True,depthwise=True).cuda()
 model.train()
 optimizer = torch.optim.Adam(model.parameters(),lr = 0.001)
 criterion = Criterion("cuda",num_classes=5)
+# model.load_state_dict(torch.load('model'))
+# n_p = sum(x.numel() for x in model.parameters())
+# print(n_p/(1024 ** 2))
 #梯度缩放器
 scaler = GradScaler()
 
@@ -303,4 +307,4 @@ for epoch in range(100):
 
         print(f"Epoch: {epoch}, Loss: {loss_dict['losses']}")
     torch.save(model.state_dict(),"model")
-#model.load_state_dict(torch.load('model'))加载参数
+#model.load_state_dict(torch.load('model'))

@@ -1,6 +1,6 @@
 from torch import nn
 from YOLOv7.basebone.Conv import Conv
-from SPPF import SPPF
+from YOLOv7.neck.SPP.SPPF import SPPF
 import torch
 class SPPFBlockCSP(nn.Module):
     def __init__(self,in_dim,out_dim,pooling_size=5,expand_radio=0.5,norm_type='BN',act_type='silu',depthwise=False):
