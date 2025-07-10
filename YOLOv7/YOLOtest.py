@@ -8,6 +8,7 @@ from neck.SPP.SPPBlockCSP import SPPFBlockCSP
 from neck.PaFPN.PaFPN import YOLOv7PaFPN
 from DecoupledHead.DecoupledHead import DecoupledHead
 from loss import Criterion
+from basebone.ELANNet_Tiny import ELANNet_Tiny
 
 
 class YOLO(nn.Module):
@@ -28,8 +29,8 @@ class YOLO(nn.Module):
         self.topk = topk
         self.trainable = trainable
         #主干网络
-        self.backbone = ELANNet(depthwise=depthwise)
-        self.neck_dims = self.backbone.feat_dim[-3:]
+        self.backbone = ELANNet_Tiny(depthwise=depthwise)
+        self.neck_dims = self.backbone.feat_dims[-3:]
         #颈部网络
         self.neck = SPPFBlockCSP(in_dim=self.neck_dims[-1],out_dim=self.neck_dims[-1]//2,depthwise=depthwise)
         self.neck_dims[-1] = self.neck_dims[-1]//2
@@ -51,8 +52,17 @@ class YOLO(nn.Module):
                               ])
         self.reg_preds = nn.ModuleList(
                             [nn.Conv2d(head.reg_out_dim, 4, kernel_size=1)
-                                for head in self.head
-                              ])
+                                for head in self.head])
+
+    def decode_box(self, reg_pred, anchors, fmp_size):
+            # 归一化解码
+        grid_scale = 1.0 / torch.tensor(fmp_size, device=reg_pred.device)
+        ctr_pred = reg_pred[..., :2].sigmoid() * grid_scale + anchors[..., :2]
+        wh_pred = torch.exp(reg_pred[..., 2:].clamp(max=5)) * grid_scale
+        return torch.cat([
+            (ctr_pred - wh_pred / 2).clamp(0, 1),
+            (ctr_pred + wh_pred / 2).clamp(0, 1)
+        ], dim=-1)
     @torch.no_grad()
     def inference_single_image(self,x):
         x1 = self.backbone(x)
@@ -91,7 +101,7 @@ class YOLO(nn.Module):
             all_box_preds.append(box_pred)
             all_anchors.append(anchors)
 
-        bboxes, scores, labels = self.post_process(
+        scores ,labels,bboxes= self.post_process(
             all_obj_preds, all_cls_preds, all_box_preds)
         return bboxes, scores, labels
 
@@ -99,7 +109,7 @@ class YOLO(nn.Module):
 
     def forward(self, x):
         if not self.trainable:
-            return self.inference_single_image
+            return self.inference_single_image(x)
         else:
             x1 = self.backbone(x)
 
@@ -162,19 +172,31 @@ class YOLO(nn.Module):
 
     def generate_anchors(self,level,fmp_size):
         fmp_h, fmp_w = fmp_size
-        anchor_y, anchor_x = torch.meshgrid([torch.arange(fmp_h),torch.arange(fmp_w)],indexing="xy")
+        anchor_y, anchor_x = torch.meshgrid([torch.arange(fmp_h,device=self.device),torch.arange(fmp_w,device=self.device)],indexing='ij')
         anchor_xy = torch.stack([anchor_x,anchor_y],dim=-1).float().view(-1,2)
         anchor_xy += 0.5
         anchor_xy *= self.stride[level]
         anchors = anchor_xy.to(self.device)
         return anchors
+    # def generate_anchors(self, level, fmp_size):
+    #     fmp_h, fmp_w = fmp_size
+    #     # 生成归一化网格坐标 [0,1]
+    #     y, x = torch.meshgrid(
+    #         torch.linspace(0, 1, fmp_h, device=self.device),
+    #         torch.linspace(0, 1, fmp_w, device=self.device),
+    #         indexing='ij'
+    #     )
+    #     anchor_xy = torch.stack([x, y], dim=-1).view(-1, 2)
+    #     # 中心对齐补偿
+    #     anchor_xy += 0.5 / min(fmp_h, fmp_w)
+    #     return anchor_xy
 
     #非极大值抑制操作
     def nms(self,bounding_box,scores):
         """
         只保留得分最高的边界框，并移除与其重叠度较高的其他边框（针对单个类别）
-        :param bounding_box:[13*13,4]
-        :param scores:[13*13,1]
+        :param
+        :param
         :return:
         """
         x1 = bounding_box[:,0]
@@ -202,7 +224,7 @@ class YOLO(nn.Module):
             yy2 = np.minimum(y2[i],y2[order[1:]])
             #计算交集的宽和高
             w = np.maximum(1e-10,xx2-xx1)
-            h = np.minimum(1e-10,yy2-yy1)
+            h = np.maximum(1e-10,yy2-yy1)
             #计算交集的面积
             inter = w * h
             #计算交并比
@@ -269,7 +291,7 @@ class YOLO(nn.Module):
 
 model = YOLO(trainable=True,depthwise=True).cuda()
 model.train()
-optimizer = torch.optim.Adam(model.parameters(),lr = 0.001)
+optimizer = torch.optim.Adam(model.parameters(),lr = 0.01)
 criterion = Criterion("cuda",num_classes=5)
 # model.load_state_dict(torch.load('model'))
 # n_p = sum(x.numel() for x in model.parameters())
@@ -283,13 +305,16 @@ image_vis_dir = '../train/vis'
 dataset = Loader(image_ir_dir,image_vis_dir,annotation_dir)
 dataloader = DataLoader(
             dataset,
-            batch_size=16,
+            batch_size=8,
             shuffle=True,
             num_workers=0,
             pin_memory=True,
             collate_fn=collate_fn
         )
-
+#探查gpu内存使用情况
+def print_memory_usage():
+    print("GPU memory usage:", torch.cuda.memory_allocated() / (1024 * 1024 * 1024), "GB")
+    print("GPU memory reserved:", torch.cuda.memory_reserved() / (1024 * 1024 * 1024), "GB")
 for epoch in range(100):
     for images,targets in dataloader:
         images = images.to("cuda")
@@ -298,13 +323,18 @@ for epoch in range(100):
         with autocast("cuda",enabled=True):
             preds = model(images)
             loss_dict = criterion(preds,targets,epoch)
+            print_memory_usage()
         #缩放损失并反向传播
         scaler.scale(loss_dict['losses']).backward()
         #更新参数（自动取消缩放）
         scaler.step(optimizer)
         #调整缩放因子
         scaler.update()
-
-        print(f"Epoch: {epoch}, Loss: {loss_dict['losses']}")
-    torch.save(model.state_dict(),"model")
+        torch.cuda.empty_cache()
+        if epoch >= 9:
+            print(
+                f"Epoch: {epoch}, Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']},loss_box_aux{loss_dict['loss_box_aux']}")
+        else:
+            print(f"Epoch: {epoch}, Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']}")
+    torch.save(model.state_dict(),"model1")
 #model.load_state_dict(torch.load('model'))

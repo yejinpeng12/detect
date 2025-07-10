@@ -28,6 +28,7 @@ def get_ious(bboxes1,
 
     eps = torch.finfo(torch.float32).eps
 
+
     bboxes1_area = (bboxes1[..., 2] - bboxes1[..., 0]).clamp_(min=0) \
         * (bboxes1[..., 3] - bboxes1[..., 1]).clamp_(min=0)
     bboxes2_area = (bboxes2[..., 2] - bboxes2[..., 0]).clamp_(min=0) \
@@ -41,6 +42,8 @@ def get_ious(bboxes1,
     area_intersect = w_intersect * h_intersect
     area_union = bboxes2_area + bboxes1_area - area_intersect
     ious = area_intersect / area_union.clamp(min=eps)
+    #确保输入值在[0,1]范围内，torch.clamp把输入的值限制在指定范围内
+    ious = torch.clamp(ious,0.0, 1.0)
 
     if iou_type == "iou":
         return ious
@@ -51,6 +54,7 @@ def get_ious(bboxes1,
             - torch.min(bboxes1[..., 1], bboxes2[..., 1])
         ac_uion = g_w_intersect * g_h_intersect
         gious = ious - (ac_uion - area_union) / ac_uion.clamp(min=eps)
+        gious = torch.clamp(gious,0.0,1.0)#约束范围
         return gious
     else:
         raise NotImplementedError
@@ -58,12 +62,12 @@ def get_ious(bboxes1,
 class Criterion(object):
     def __init__(self,
                  device,
-                 num_classes=80):
+                 num_classes=5):
         self.device = device
         self.num_classes = num_classes
         self.max_epoch = 20
         self.no_aug_epoch = 10
-        self.aux_bbox_loss = False
+        # self.aux_bbox_loss = True
         # loss weight
         self.loss_obj_weight = 1.0
         self.loss_cls_weight = 1.0
@@ -87,6 +91,9 @@ class Criterion(object):
     def loss_bboxes(self, pred_box, gt_box):
         # regression loss
         ious = get_ious(pred_box, gt_box, "xyxy", 'giou')
+        #print("pred_box",pred_box)
+        # print("gt_box",gt_box)
+        # print(ious)
         loss_box = 1.0 - ious
 
         return loss_box

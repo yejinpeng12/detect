@@ -1,10 +1,11 @@
 import os
 import torchvision
 from PIL import Image
-import numpy as np
 import torch
 from torch.utils.data import Dataset, DataLoader
-
+import matplotlib.pyplot as plt
+import matplotlib.patches as patches
+import numpy as np
 
 test_ClASS = ['person','cyclist','car','truck','bus']
 target_size = (640,640)
@@ -17,8 +18,7 @@ def resize_aspect_ratio(image):
     new_width = int(width * scale)
     new_height = int(height * scale)
     #等比缩放
-    resize = torchvision.transforms.Resize((new_width,new_height))
-    resized_image = resize(image)
+    resized_image = image.resize((new_width, new_height), resample=Image.Resampling.BILINEAR)
     return resized_image,scale,(width,height)
 def pad_to_target_size(image):
     width, height = image.size
@@ -31,14 +31,7 @@ def pad_to_target_size(image):
     #补零操作
     padding = torchvision.transforms.Pad(padding=(padding_left,padding_top,padding_right,padding_bottom),fill=0)
     padded_image = padding(image)
-    return padded_image,(padding_left,padding_top)
-resize_transform = torchvision.transforms.Lambda(resize_aspect_ratio)
-pad_transform = torchvision.transforms.Lambda(pad_to_target_size)
-data_transforms = torchvision.transforms.Compose([
-    resize_transform,
-    pad_transform,
-    torchvision.transforms.ToTensor()
-])
+    return padded_image,(padding_left,padding_top,padding_right,padding_bottom)
 class Loader(Dataset):
     def __init__(self,image_ir_dir,image_vis_dir,label_dir,transform=None):
         self.image_ir_dir = image_ir_dir
@@ -60,7 +53,7 @@ class Loader(Dataset):
         resized_vis,scale,(orig_w,orig_h) = resize_aspect_ratio(image_vis)
         resized_ir,_,_ = resize_aspect_ratio(image_ir)
 
-        padded_vis, (pad_x, pad_y) = pad_to_target_size(resized_vis)
+        padded_vis, (padding_left, padding_top,_,_) = pad_to_target_size(resized_vis)
         padded_ir, _ = pad_to_target_size(resized_ir)
 
         image_vis_tensor = self.to_tensor(padded_vis)
@@ -78,10 +71,11 @@ class Loader(Dataset):
                 y_center_abs = y_center * orig_h
                 w_abs = w * orig_w
                 h_abs = h * orig_h
-                x_min = x_center_abs - w_abs / 2
-                y_min = y_center_abs - h_abs / 2
-                x_max = x_center_abs + w_abs / 2
-                y_max = y_center_abs + h_abs / 2
+
+                x_min = x_center_abs - (w_abs / 2)
+                y_min = y_center_abs - (h_abs / 2)
+                x_max = x_center_abs + (w_abs / 2)
+                y_max = y_center_abs + (h_abs / 2)
 
                 # Step 2: 应用缩放
                 x_min *= scale
@@ -89,23 +83,25 @@ class Loader(Dataset):
                 x_max *= scale
                 y_max *= scale
 
+
                 # Step 3: 应用填充偏移
-                x_min += pad_x
-                y_min += pad_y
-                x_max += pad_x
-                y_max += pad_y
+                x_min += padding_left
+                y_min += padding_top
+                x_max += padding_left
+                y_max += padding_top
 
                 # Step 4: 重新归一化到目标尺寸
-                x_min /= target_size[0]
-                y_min /= target_size[1]
-                x_max /= target_size[0]
-                y_max /= target_size[1]
+                # x_min /= target_size[0]
+                # y_min /= target_size[1]
+                # x_max /= target_size[0]
+                # y_max /= target_size[1]
 
-                # Step 5: 边界检查（确保坐标在[0, 1]范围内）
-                x_min = max(0, min(1, x_min))
-                y_min = max(0, min(1, y_min))
-                x_max = max(0, min(1, x_max))
-                y_max = max(0, min(1, y_max))
+                # Step 5: 边界检查（确保坐标在[0, 640]范围内）
+                x_min = max(0, min(640, x_min))
+                y_min = max(0, min(640, y_min))
+                x_max = max(0, min(640, x_max))
+                y_max = max(0, min(640, y_max))
+                class_id = max(0,min(4,class_id))
 
                 # 确保x_max > x_min且y_max > y_min
                 if x_max <= x_min or y_max <= y_min:
@@ -138,46 +134,118 @@ if __name__ == "__main__":
     image_vis_dir = '../train/vis'
     image_vis_path = os.listdir(image_vis_dir)
 
-    # targets = []
-    # for i in annotation_path:
-    #     data = []
-    #     i = os.path.join(annotation_dir,i)
-    #     with open(i,'r') as f:
-    #         for line in f:
-    #             #split()：按分隔符分割字符串
-    #             #strip()：去除字符串两端的空白字符
-    #             data1 = line.strip().split()
-    #             data.append([int(data1[0]), float(data1[1]), float(data1[2]), float(data1[3]), float(data1[4])])
-    #     targets.append(data)
-    #     del data
-    #     print(targets)
-    #     break
     dataset = Loader(image_ir_dir,image_vis_dir,annotation_dir)
-    dataloader = DataLoader(
-            dataset,
-            batch_size=16,
-            shuffle=True,
-            num_workers=0,
-            pin_memory=True,
-            collate_fn=collate_fn  # 处理变长标签
+    # dataloader = DataLoader(
+    #         dataset,
+    #         batch_size=16,
+    #         shuffle=True,
+    #         num_workers=0,
+    #         pin_memory=True,
+    #         collate_fn=collate_fn  # 处理变长标签
+    #     )
+    # for images, labels in dataloader:
+    #         print(f"Batch images shape: {images[0][0][0]}")  # [B, 4, H, W]
+    #         print(labels[0]['boxes'])
+    #         print(len(labels))
+    #         break
+
+
+def validate_annotations(dataset, num_samples=5, show_ir_channel=False):
+    """
+    验证标签标注是否正确
+    Args:
+        dataset: 加载好的数据集对象
+        num_samples: 要验证的样本数量
+        show_ir_channel: 是否显示红外通道
+    """
+    # 随机选择样本
+    indices = np.random.choice(len(dataset), num_samples, replace=False)
+
+    for idx in indices:
+        image, labels = dataset[idx]
+
+        # 准备图像显示
+        fig, ax = plt.subplots(1, figsize=(12, 12))
+
+        # 处理图像显示
+        if show_ir_channel:
+            # 合并可见光和红外通道（红外显示为红色增强）
+            img_display = image[:3].clone()
+            img_display[0] = torch.clamp(img_display[0] + image[3], 0, 1)  # 将红外通道加到红色通道
+            img_np = img_display.permute(1, 2, 0).numpy()
+        else:
+            # 仅显示RGB通道
+            img_np = image[:3].permute(1, 2, 0).numpy()
+
+        img_np = (img_np * 255).astype('uint8')
+        ax.imshow(img_np)
+
+        # 绘制边界框和标签
+        boxes = labels['boxes'].numpy()
+        class_ids = labels['labels'].numpy()
+
+        for box, cls_id in zip(boxes, class_ids):
+            # 反归一化坐标
+            x1, y1, x2, y2 = box
+            # x1 *= target_size[0]
+            # y1 *= target_size[1]
+            # x2 *= target_size[0]
+            # y2 *= target_size[1]
+            width = x2 - x1
+            height = y2 - y1
+
+            # 验证类别ID是否有效
+            if cls_id >= len(test_ClASS):
+                print(f"警告：无效类别ID {cls_id} (最大应为 {len(test_ClASS) - 1})")
+                continue
+
+            # 绘制边界框
+            rect = patches.Rectangle(
+                (x1, y1), width, height,
+                linewidth=2, edgecolor='lime', facecolor='none'
+            )
+            ax.add_patch(rect)
+
+            # 添加类别标签
+            label = test_ClASS[cls_id]
+            ax.text(
+                x1, y1 - 5, f"{label} (ID:{cls_id})",
+                color='lime', fontsize=12, weight='bold',
+                bbox=dict(facecolor='black', alpha=0.5, pad=1)
+            )
+
+        # 添加标题信息
+        plt.title(
+            f"验证样本 {idx}\n"
+            f"文件名: {dataset.image_files[idx]}\n"
+            f"目标数: {len(class_ids)} | "
+            f"图像尺寸: {image.shape[1]}x{image.shape[2]} | "
+            f"有效类别: {np.unique(class_ids)}",
+            fontsize=12
         )
-    for images, labels in dataloader:
-            print(f"Batch images shape: {images.shape}")  # [B, 4, H, W]
-            print(labels[0]['boxes'])
-            print(len(labels))
-            break
-    # images = []
-    # resize_transform = torchvision.transforms.Resize((100,100))
-    #
-    # for i,j in zip(image_ir_path,image_vis_path):
-    #     i = os.path.join(image_ir_dir,i)
-    #     j = os.path.join(image_vis_dir,j)
-    #     image_ir = Image.open(i)
-    #     image_vis = Image.open(j)
-    #     image_ir = to_tensor(resize_transform.forward(image_ir))
-    #     image_vis = to_tensor(resize_transform.forward(image_vis))
-    #     image = torch.cat([image_ir,image_vis],dim=0)
-    #     images.append(image)
-    #     del i,image,image_ir,image_vis
-    # images = np.array(images)
-    # print(images.shape)
+        plt.axis('off')
+        plt.tight_layout()
+        plt.show()
+
+        # 打印详细坐标信息
+        print(f"\n样本 {idx} 详细标注信息:")
+        for i, (box, cls_id) in enumerate(zip(boxes, class_ids)):
+            print(f"  目标 {i + 1}: {test_ClASS[cls_id]} (ID:{cls_id})")
+            print(f"    归一化坐标: x1={box[0]:.4f}, y1={box[1]:.4f}, x2={box[2]:.4f}, y2={box[3]:.4f}")
+            print(f"    像素坐标: x1={int(box[0] * target_size[0])}, y1={int(box[1] * target_size[1])}, "
+                  f"x2={int(box[2] * target_size[0])}, y2={int(box[3] * target_size[1])}")
+            print(
+                f"    框尺寸: {int((box[2] - box[0]) * target_size[0])}x{int((box[3] - box[1]) * target_size[1])} 像素")
+
+
+# 使用示例
+if __name__ == "__main__":
+    # 初始化数据集
+    dataset = Loader(
+        image_ir_dir='../train/ir',
+        image_vis_dir='../train/vis',
+        label_dir='../train/label'
+    )
+
+    # 验证5个随机样本（显示红外通道）
+    validate_annotations(dataset, num_samples=5, show_ir_channel=True)

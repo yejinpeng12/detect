@@ -5,37 +5,38 @@ from YOLOv7.basebone.Downsample import Downsample
 import torch.nn.functional as F
 import torch
 class YOLOv7PaFPN(nn.Module):
-    def __init__(self,in_dims,out_dim,norm_type='BN',act_type='silu',depthwise=False):
+    def __init__(self,in_dims,out_dim,channel_width = 0.5,norm_type='BN',act_type='silu',depthwise=False):
         super().__init__()
         self.in_dims = in_dims
+        self.channel_width = channel_width
         c3,c4,c5 = in_dims
 
-        self.reduce_layer_1 = Conv(c5, 256, k=1, norm_type=norm_type, act_type=act_type)
-        self.reduce_layer_2 = Conv(c4 , 256, k=1, norm_type=norm_type, act_type=act_type)
-        self.top_down_layer_1 = ELANBlockFPN(in_dim=256 + 256,out_dim=256,act_type=act_type,norm_type=norm_type,depthwise=depthwise)
+        self.reduce_layer_1 = Conv(c5, round(256*channel_width), k=1, norm_type=norm_type, act_type=act_type)
+        self.reduce_layer_2 = Conv(c4 , round(256*channel_width), k=1, norm_type=norm_type, act_type=act_type)
+        self.top_down_layer_1 = ELANBlockFPN(in_dim=round(256*channel_width) + round(256*channel_width),out_dim=round(256*channel_width),act_type=act_type,norm_type=norm_type,depthwise=depthwise)
 
-        self.reduce_layer_3 = Conv(256, 128, k=1, norm_type=norm_type,act_type=act_type)
-        self.reduce_layer_4 = Conv(c3, 128, k=1, norm_type=norm_type,act_type=act_type)
-        self.top_down_layer_2 = ELANBlockFPN(in_dim=128 + 128,out_dim=128,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.reduce_layer_3 = Conv(round(256*channel_width),  round(128*channel_width), k=1, norm_type=norm_type,act_type=act_type)
+        self.reduce_layer_4 = Conv(c3,  round(128*channel_width), k=1, norm_type=norm_type,act_type=act_type)
+        self.top_down_layer_2 = ELANBlockFPN(in_dim=round(128*channel_width) + round(128*channel_width),out_dim=round(128*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
 
-        self.downsample_layer_1 = Downsample(in_dim=128,out_dim=256,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
-        self.bottom_up_layer_1 = ELANBlockFPN(in_dim=256+256,out_dim=256,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.downsample_layer_1 = Downsample(in_dim=round(128*channel_width),out_dim=round(256*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.bottom_up_layer_1 = ELANBlockFPN(in_dim=round(256*channel_width) + round(256*channel_width),out_dim=round(256*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
 
-        self.downsample_layer_2 = Downsample(in_dim=256,out_dim=512,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
-        self.bottom_up_layer_2 = ELANBlockFPN(in_dim=512+c5,out_dim=512,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.downsample_layer_2 = Downsample(in_dim=round(256*channel_width),out_dim= round(512*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.bottom_up_layer_2 = ELANBlockFPN(in_dim=round(512*channel_width)+c5,out_dim=round(512*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
 
-        self.head_conv_1 = Conv(128,256,k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
-        self.head_conv_2 = Conv(256,512,k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
-        self.head_conv_3 = Conv(512,1024,k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.head_conv_1 = Conv(round(128*channel_width), round(256*channel_width),k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.head_conv_2 = Conv(round(256*channel_width), round(512*channel_width),k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.head_conv_3 = Conv(round(512*channel_width), round(1024*channel_width),k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
 
         if out_dim is not None:
             self.out_layers = nn.ModuleList([
-                Conv(in_dim, out_dim, k=1, norm_type=norm_type,act_type=act_type) for in_dim in [256, 512, 1024]
+                Conv(in_dim, out_dim, k=1, norm_type=norm_type,act_type=act_type) for in_dim in [round(256*channel_width), round(512*channel_width), round(1024*channel_width)]
             ])
             self.out_dim = [out_dim] * 3
         else:
             self.out_layers = None
-            self.out_dim = [256, 512, 1024]
+            self.out_dim = [round(256*channel_width), round(512*channel_width), round(1024*channel_width)]
     def forward(self, features):
         c3, c4, c5 = features
 

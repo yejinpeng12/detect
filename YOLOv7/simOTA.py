@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from networkx.algorithms.tournament import score_sequence
 from torchvision.ops.boxes import box_area
 
 def box_iou(boxes1, boxes2):
@@ -14,7 +15,8 @@ def box_iou(boxes1, boxes2):
 
     union = area1[:, None] + area2 - inter
 
-    iou = inter / union
+    iou = inter / union.clamp(min=1e-8)
+    iou = torch.clamp(iou, 0.0, 1.0)
     return iou, union
 class SimOTA(object):
     """
@@ -55,16 +57,18 @@ class SimOTA(object):
         reg_cost = -torch.log(pair_wise_ious + 1e-8)  # [N, Mp]
 
         # ----------------------- Cls cost -----------------------
-        with torch.cuda.amp.autocast(enabled=False):
+        with torch.amp.autocast('cuda',enabled=True):
             # [Mp, C]
-            score_preds = torch.sqrt(obj_preds.sigmoid_() * cls_preds.sigmoid_())
+            score_preds = torch.sqrt(obj_preds * cls_preds)
+            #score_preds = torch.sqrt(obj_preds.sigmoid_() * cls_preds.sigmoid_())
             # [N, Mp, C]
             score_preds = score_preds.unsqueeze(0).repeat(num_gt, 1, 1)
             # prepare cls_target
             cls_targets = F.one_hot(tgt_labels.long(), self.num_classes).float()
             cls_targets = cls_targets.unsqueeze(1).repeat(1, score_preds.size(1), 1)
             # [N, Mp]
-            cls_cost = F.binary_cross_entropy(score_preds, cls_targets, reduction="none").sum(-1)
+            #cls_cost = F.binary_cross_entropy(score_preds, cls_targets, reduction="none").sum(-1)
+            cls_cost = F.binary_cross_entropy_with_logits(score_preds, cls_targets, reduction="none").sum(-1)
         del score_preds
 
         # ----------------------- Dynamic K-Matching -----------------------
@@ -164,6 +168,7 @@ class SimOTA(object):
         ious_in_boxes_matrix = pair_wise_ious
         n_candidate_k = min(self.topk_candidate, ious_in_boxes_matrix.size(1))
         #ious_in_boxes_matrix.size(1)取Mp
+        ious_in_boxes_matrix = torch.clamp(ious_in_boxes_matrix, 0.0, 1.0)
         topk_ious, _ = torch.topk(ious_in_boxes_matrix, n_candidate_k, dim=1)
         #torch.topk()用于从张量中选取前 k 个最大值（或最小值）及其索引
         dynamic_ks = torch.clamp(topk_ious.sum(1).int(), min=1)

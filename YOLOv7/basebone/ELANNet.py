@@ -6,7 +6,7 @@ class ELANNet(nn.Module):
     #k=3,p=1,s=2会将图片长宽减半
     def __init__(self,norm_type='BN',act_type='silu',depthwise=False):
         super().__init__()
-        self.feat_dim = [32,64,128,256,512,1024,1024]
+        self.feat_dims = [32,64,128,256,512,1024,1024]
         self.squeeze_ratios = [0.5,0.5,0.5,0.25]
         self.branch_depths = [2,2,2,2]
 

@@ -1,7 +1,7 @@
 from torch import nn
 from YOLOv7.basebone.Conv import Conv
 class DecoupledHead(nn.Module):
-    def __init__(self,in_dim,out_dim,num_cls_head=2,num_reg_head=2,norm_type='BN',act_type='silu',num_classes=20,depthwise=False):
+    def __init__(self,in_dim,out_dim,num_cls_head=2,num_reg_head=2,norm_type='BN',act_type='silu',num_classes=5,depthwise=False):
         super().__init__()
         self.in_dim = in_dim
         self.num_reg_head=num_reg_head
