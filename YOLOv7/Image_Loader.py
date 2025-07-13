@@ -91,17 +91,17 @@ class Loader(Dataset):
                 y_max += padding_top
 
                 # Step 4: 重新归一化到目标尺寸
-                # x_min /= target_size[0]
-                # y_min /= target_size[1]
-                # x_max /= target_size[0]
-                # y_max /= target_size[1]
+                x_min /= target_size[0]
+                y_min /= target_size[1]
+                x_max /= target_size[0]
+                y_max /= target_size[1]
 
                 # Step 5: 边界检查（确保坐标在[0, 640]范围内）
-                x_min = max(0, min(640, x_min))
-                y_min = max(0, min(640, y_min))
-                x_max = max(0, min(640, x_max))
-                y_max = max(0, min(640, y_max))
-                class_id = max(0,min(4,class_id))
+                # x_min = max(0, min(640, x_min))
+                # y_min = max(0, min(640, y_min))
+                # x_max = max(0, min(640, x_max))
+                # y_max = max(0, min(640, y_max))
+                # class_id = max(0,min(4,class_id))
 
                 # 确保x_max > x_min且y_max > y_min
                 if x_max <= x_min or y_max <= y_min:
@@ -187,10 +187,10 @@ def validate_annotations(dataset, num_samples=5, show_ir_channel=False):
         for box, cls_id in zip(boxes, class_ids):
             # 反归一化坐标
             x1, y1, x2, y2 = box
-            # x1 *= target_size[0]
-            # y1 *= target_size[1]
-            # x2 *= target_size[0]
-            # y2 *= target_size[1]
+            x1 *= target_size[0]
+            y1 *= target_size[1]
+            x2 *= target_size[0]
+            y2 *= target_size[1]
             width = x2 - x1
             height = y2 - y1
 

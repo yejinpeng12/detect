@@ -90,11 +90,12 @@ class YOLO(nn.Module):
             reg_pred = reg_pred[0].permute(1, 2, 0).contiguous().view(-1, 4)
 
             # decode bbox
-            ctr_pred = reg_pred[..., :2] * self.stride[level] + anchors[..., :2]
-            wh_pred = torch.exp(reg_pred[..., 2:]) * self.stride[level]
-            pred_x1y1 = ctr_pred - wh_pred * 0.5
-            pred_x2y2 = ctr_pred + wh_pred * 0.5
-            box_pred = torch.cat([pred_x1y1, pred_x2y2], dim=-1)
+            # ctr_pred = reg_pred[..., :2] * self.stride[level] + anchors[..., :2]
+            # wh_pred = torch.exp(reg_pred[..., 2:]) * self.stride[level]
+            # pred_x1y1 = ctr_pred - wh_pred * 0.5
+            # pred_x2y2 = ctr_pred + wh_pred * 0.5
+            # box_pred = torch.cat([pred_x1y1, pred_x2y2], dim=-1)
+            box_pred = self.decode_box(reg_pred,anchors,fmp_size)
 
             all_obj_preds.append(obj_pred)
             all_cls_preds.append(cls_pred)
@@ -104,9 +105,6 @@ class YOLO(nn.Module):
         scores ,labels,bboxes= self.post_process(
             all_obj_preds, all_cls_preds, all_box_preds)
         return bboxes, scores, labels
-
-
-
     def forward(self, x):
         if not self.trainable:
             return self.inference_single_image(x)
@@ -143,13 +141,15 @@ class YOLO(nn.Module):
                 obj_pred = obj_pred.permute(0, 2, 3, 1).contiguous().view(b, -1, 1)
                 cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous().view(b, -1, self.num_classes)
                 reg_pred = reg_pred.permute(0, 2, 3, 1).contiguous().view(b, -1, 4)
-
                 # decode bbox
-                ctr_pred = reg_pred[..., :2] * self.stride[level] + anchors[..., :2]
-                wh_pred = torch.exp(reg_pred[..., 2:]) * self.stride[level]
-                pred_x1y1 = ctr_pred - wh_pred * 0.5
-                pred_x2y2 = ctr_pred + wh_pred * 0.5
-                box_pred = torch.cat([pred_x1y1, pred_x2y2], dim=-1)
+                # ctr_pred = reg_pred[..., :2] * self.stride[level] + anchors[..., :2]
+                # wh_pred = torch.exp(reg_pred[..., 2:]) * self.stride[level]
+                # pred_x1y1 = ctr_pred - wh_pred * 0.5
+                # pred_x2y2 = ctr_pred + wh_pred * 0.5
+                # box_pred = torch.cat([pred_x1y1, pred_x2y2], dim=-1)
+                box_pred = self.decode_box(reg_pred,anchors,fmp_size)
+                # print("box_pred min:", reg_pred.min().item())
+                # print("box_pred max:", reg_pred.max().item())
 
                 all_obj_preds.append(obj_pred)
                 all_cls_preds.append(cls_pred)
@@ -170,26 +170,26 @@ class YOLO(nn.Module):
 
             return outputs
 
-    def generate_anchors(self,level,fmp_size):
-        fmp_h, fmp_w = fmp_size
-        anchor_y, anchor_x = torch.meshgrid([torch.arange(fmp_h,device=self.device),torch.arange(fmp_w,device=self.device)],indexing='ij')
-        anchor_xy = torch.stack([anchor_x,anchor_y],dim=-1).float().view(-1,2)
-        anchor_xy += 0.5
-        anchor_xy *= self.stride[level]
-        anchors = anchor_xy.to(self.device)
-        return anchors
-    # def generate_anchors(self, level, fmp_size):
+    # def generate_anchors(self,level,fmp_size):
     #     fmp_h, fmp_w = fmp_size
-    #     # 生成归一化网格坐标 [0,1]
-    #     y, x = torch.meshgrid(
-    #         torch.linspace(0, 1, fmp_h, device=self.device),
-    #         torch.linspace(0, 1, fmp_w, device=self.device),
-    #         indexing='ij'
-    #     )
-    #     anchor_xy = torch.stack([x, y], dim=-1).view(-1, 2)
-    #     # 中心对齐补偿
-    #     anchor_xy += 0.5 / min(fmp_h, fmp_w)
-    #     return anchor_xy
+    #     anchor_y, anchor_x = torch.meshgrid([torch.arange(fmp_h,device=self.device),torch.arange(fmp_w,device=self.device)],indexing='ij')
+    #     anchor_xy = torch.stack([anchor_x,anchor_y],dim=-1).float().view(-1,2)
+    #     anchor_xy += 0.5
+    #     anchor_xy *= self.stride[level]
+    #     anchors = anchor_xy.to(self.device)
+    #     return anchors
+    def generate_anchors(self, level, fmp_size):
+        fmp_h, fmp_w = fmp_size
+        # 生成归一化网格坐标 [0,1]
+        y, x = torch.meshgrid(
+            torch.linspace(0, 1, fmp_h, device=self.device),
+            torch.linspace(0, 1, fmp_w, device=self.device),
+            indexing='ij'
+        )
+        anchor_xy = torch.stack([x, y], dim=-1).view(-1, 2)
+        # 中心对齐补偿
+        anchor_xy += 0.5 / min(fmp_h, fmp_w)
+        return anchor_xy
 
     #非极大值抑制操作
     def nms(self,bounding_box,scores):
@@ -289,52 +289,59 @@ class YOLO(nn.Module):
 
         return scores,labels,bboxes
 
-model = YOLO(trainable=True,depthwise=True).cuda()
-model.train()
-optimizer = torch.optim.Adam(model.parameters(),lr = 0.01)
-criterion = Criterion("cuda",num_classes=5)
-# model.load_state_dict(torch.load('model'))
-# n_p = sum(x.numel() for x in model.parameters())
-# print(n_p/(1024 ** 2))
-#梯度缩放器
-scaler = GradScaler()
-
-annotation_dir = '../train/label'
-image_ir_dir = '../train/ir'
-image_vis_dir = '../train/vis'
-dataset = Loader(image_ir_dir,image_vis_dir,annotation_dir)
-dataloader = DataLoader(
-            dataset,
-            batch_size=8,
-            shuffle=True,
-            num_workers=0,
-            pin_memory=True,
-            collate_fn=collate_fn
-        )
 #探查gpu内存使用情况
 def print_memory_usage():
     print("GPU memory usage:", torch.cuda.memory_allocated() / (1024 * 1024 * 1024), "GB")
     print("GPU memory reserved:", torch.cuda.memory_reserved() / (1024 * 1024 * 1024), "GB")
-for epoch in range(100):
-    for images,targets in dataloader:
-        images = images.to("cuda")
-        optimizer.zero_grad()
-        #启用混合精度上下文
-        with autocast("cuda",enabled=True):
-            preds = model(images)
-            loss_dict = criterion(preds,targets,epoch)
-            print_memory_usage()
-        #缩放损失并反向传播
-        scaler.scale(loss_dict['losses']).backward()
-        #更新参数（自动取消缩放）
-        scaler.step(optimizer)
-        #调整缩放因子
-        scaler.update()
-        torch.cuda.empty_cache()
-        if epoch >= 9:
-            print(
-                f"Epoch: {epoch}, Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']},loss_box_aux{loss_dict['loss_box_aux']}")
-        else:
-            print(f"Epoch: {epoch}, Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']}")
-    torch.save(model.state_dict(),"model1")
-#model.load_state_dict(torch.load('model'))
+
+if __name__ == '__main__':
+    model = YOLO(trainable=True,depthwise=True).cuda()
+    model.train()
+    optimizer = torch.optim.Adam(model.parameters(),lr = 0.01)
+    criterion = Criterion("cuda",num_classes=5)
+    model.load_state_dict(torch.load('model1'))
+    n_p = sum(x.numel() for x in model.parameters())
+    print(n_p/(1024 ** 2))
+    #梯度缩放器
+    scaler = GradScaler(init_scale=2.0**15, growth_factor=2.0, backoff_factor=0.5)
+
+    annotation_dir = '../train/label'
+    image_ir_dir = '../train/ir'
+    image_vis_dir = '../train/vis'
+    dataset = Loader(image_ir_dir,image_vis_dir,annotation_dir)
+    dataloader = DataLoader(
+                dataset,
+                batch_size=8,
+                shuffle=True,
+                num_workers=0,
+                pin_memory=True,
+                collate_fn=collate_fn
+            )
+    torch.autograd.set_detect_anomaly(True)
+    for epoch in range(7,20):
+        for images,targets in dataloader:
+            images = images.to("cuda")
+            optimizer.zero_grad()
+            #启用混合精度上下文
+            with autocast("cuda",enabled=False,dtype=torch.float16):
+                preds = model(images)
+                loss_dict = criterion(preds,targets,epoch)
+                losses = loss_dict['losses'] * images.shape[0]
+                print_memory_usage()
+            #缩放损失并反向传播
+            scaler.scale(losses).backward()
+            #梯度裁剪
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            #更新参数（自动取消缩放）
+            scaler.step(optimizer)
+            #调整缩放因子
+            scaler.update()
+            torch.cuda.empty_cache()
+            if epoch >= 9:
+                print(
+                    f"Epoch: {epoch}, Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']},loss_box_aux{loss_dict['loss_box_aux']}")
+            else:
+                print(f"Epoch: {epoch}, Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']}")
+        torch.save(model.state_dict(),"model1")
+    #model.load_state_dict(torch.load('model'))
