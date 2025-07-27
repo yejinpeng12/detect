@@ -42,8 +42,6 @@ def get_ious(bboxes1,
     area_intersect = w_intersect * h_intersect
     area_union = bboxes2_area + bboxes1_area - area_intersect
     ious = area_intersect / area_union.clamp(min=eps)
-    #确保输入值在[0,1]范围内，torch.clamp把输入的值限制在指定范围内
-    ious = torch.clamp(ious,0.0, 1.0)
 
     if iou_type == "iou":
         return ious
@@ -52,9 +50,8 @@ def get_ious(bboxes1,
             - torch.min(bboxes1[..., 0], bboxes2[..., 0])
         g_h_intersect = torch.max(bboxes1[..., 3], bboxes2[..., 3]) \
             - torch.min(bboxes1[..., 1], bboxes2[..., 1])
-        ac_uion = g_w_intersect * g_h_intersect
+        ac_uion = g_w_intersect * g_h_intersect#最小外接矩阵的面积
         gious = ious - (ac_uion - area_union) / ac_uion.clamp(min=eps)
-        gious = torch.clamp(gious,0.0,1.0)#约束范围
         return gious
     else:
         raise NotImplementedError
@@ -65,8 +62,8 @@ class Criterion(object):
                  num_classes=5):
         self.device = device
         self.num_classes = num_classes
-        self.max_epoch = 20
-        self.no_aug_epoch = 10
+        self.max_epoch = 100
+        self.no_aug_epoch = 50
         # self.aux_bbox_loss = True
         # loss weight
         self.loss_obj_weight = 1.0
@@ -106,12 +103,12 @@ class Criterion(object):
         gt_bwbh = gt_box[..., 2:] - gt_box[..., :2]
 
         # 计算gt的中心点delta和宽高的delta，本质就是边界框回归公式的逆推
-        gt_cxcy_encode = (gt_cxcy - anchors) / stride_tensors
-        gt_bwbh_encode = torch.log(gt_bwbh / stride_tensors)
+        gt_cxcy_encode = (gt_cxcy - anchors) * (640/stride_tensors)
+        gt_bwbh_encode = torch.log(gt_bwbh * (640/stride_tensors))
         gt_box_encode = torch.cat([gt_cxcy_encode, gt_bwbh_encode], dim=-1)
 
         # 计算预测的delta和gt的delta指甲的L1损失
-        loss_box_aux = F.l1_loss(pred_reg, gt_box_encode, reduction='none')
+        loss_box_aux = F.smooth_l1_loss(pred_reg, gt_box_encode, reduction='none')
 
         return loss_box_aux
 

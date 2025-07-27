@@ -1,6 +1,5 @@
 import torch
 import torch.nn.functional as F
-from networkx.algorithms.tournament import score_sequence
 from torchvision.ops.boxes import box_area
 
 def box_iou(boxes1, boxes2):
@@ -16,7 +15,6 @@ def box_iou(boxes1, boxes2):
     union = area1[:, None] + area2 - inter
 
     iou = inter / union.clamp(min=1e-8)
-    iou = torch.clamp(iou, 0.0, 1.0)
     return iou, union
 class SimOTA(object):
     """
@@ -127,8 +125,8 @@ class SimOTA(object):
         # [N, 2]
         gt_centers = (gt_bboxes[:, :2] + gt_bboxes[:, 2:]) * 0.5
 
-        # [1, M]
-        center_radius_ = center_radius * strides.unsqueeze(0)
+        # [1, M],进行归一化
+        center_radius_ = center_radius * (strides.unsqueeze(0) / 640)
 
         gt_bboxes_l = gt_centers[:, 0].unsqueeze(1).repeat(1, num_anchors) - center_radius_  # x1
         gt_bboxes_t = gt_centers[:, 1].unsqueeze(1).repeat(1, num_anchors) - center_radius_  # y1

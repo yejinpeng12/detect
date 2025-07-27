@@ -9,19 +9,21 @@ from neck.PaFPN.PaFPN import YOLOv7PaFPN
 from DecoupledHead.DecoupledHead import DecoupledHead
 from loss import Criterion
 from basebone.ELANNet_Tiny import ELANNet_Tiny
+from tqdm import tqdm
+import sys
 
 
 class YOLO(nn.Module):
     def __init__(self,
                  device = "cuda",
                  num_classes=5,
-                 confidence_thresh=0.01,
-                 nms_thresh=0.5,
-                 topk=100,
+                 confidence_thresh=0.3,
+                 nms_thresh=0.4,
+                 topk=1000,
                  trainable=False,
                  depthwise = False):
         super().__init__()
-        self.stride = [8,16,32]
+        self.stride = [8,16,32]#网格尺寸分别为(80*80,40*40,20*20)
         self.device = device
         self.nms_thresh = nms_thresh
         self.confidence_thresh = confidence_thresh
@@ -39,7 +41,7 @@ class YOLO(nn.Module):
         self.head_dims = self.fpn.out_dim
         #检测头
         self.head = nn.ModuleList([DecoupledHead(head_dim,head_dim,num_classes=self.num_classes,depthwise=depthwise)
-                                  for head_dim in self.head_dims])
+                                  for head_dim in self.head_dims])#这里产生了三个网格尺寸的检测头
 
         #预测层
         self.obj_preds = nn.ModuleList(
@@ -55,7 +57,7 @@ class YOLO(nn.Module):
                                 for head in self.head])
 
     def decode_box(self, reg_pred, anchors, fmp_size):
-            # 归一化解码
+        # 归一化解码
         grid_scale = 1.0 / torch.tensor(fmp_size, device=reg_pred.device)
         ctr_pred = reg_pred[..., :2].sigmoid() * grid_scale + anchors[..., :2]
         wh_pred = torch.exp(reg_pred[..., 2:].clamp(max=5)) * grid_scale
@@ -161,11 +163,11 @@ class YOLO(nn.Module):
             # output dict
             outputs = {"pred_obj": all_obj_preds,  # List(Tensor) [B, M, 1]
                        "pred_cls": all_cls_preds,  # List(Tensor) [B, M, C]
-                       "pred_box": all_box_preds,  # List(Tensor) [B, M, 4]
-                       "pred_reg": all_reg_preds,  # List(Tensor) [B, M, 4]
+                       "pred_box": all_box_preds,  # List(Tensor) [B, M, 4](x1,y1,x2,y2)
+                       "pred_reg": all_reg_preds,  # List(Tensor) [B, M, 4](tx,ty,w,h)
                        "anchors": all_anchors,  # List(Tensor) [M, 2]
                        "strides": self.stride,  # List(Int) [8, 16, 32]
-                       "stride_tensors": all_strides  # List(Tensor) [M, 1]
+                       "stride_tensors": all_strides  # List(Tensor) [M, 1]数值上是8或16或32
                        }
 
             return outputs
@@ -195,9 +197,6 @@ class YOLO(nn.Module):
     def nms(self,bounding_box,scores):
         """
         只保留得分最高的边界框，并移除与其重叠度较高的其他边框（针对单个类别）
-        :param
-        :param
-        :return:
         """
         x1 = bounding_box[:,0]
         y1 = bounding_box[:,1]
@@ -299,11 +298,14 @@ if __name__ == '__main__':
     model.train()
     optimizer = torch.optim.Adam(model.parameters(),lr = 0.01)
     criterion = Criterion("cuda",num_classes=5)
-    model.load_state_dict(torch.load('model1'))
+    model.load_state_dict(torch.load('models0'))
     n_p = sum(x.numel() for x in model.parameters())
     print(n_p/(1024 ** 2))
     #梯度缩放器
-    scaler = GradScaler(init_scale=2.0**15, growth_factor=2.0, backoff_factor=0.5)
+    scaler = GradScaler(init_scale=2.0**1,#降低初始缩放因子
+                        growth_factor=2.0,#降低增长因子
+                        backoff_factor=0.5#提高回退因子
+                        )
 
     annotation_dir = '../train/label'
     image_ir_dir = '../train/ir'
@@ -313,13 +315,15 @@ if __name__ == '__main__':
                 dataset,
                 batch_size=8,
                 shuffle=True,
-                num_workers=0,
+                num_workers=4,#根据CPU核心数调整
                 pin_memory=True,
+                persistent_workers=True,#保持worker进程
+                prefetch_factor=2,#预取2个批次
                 collate_fn=collate_fn
             )
-    torch.autograd.set_detect_anomaly(True)
-    for epoch in range(7,20):
-        for images,targets in dataloader:
+    #torch.autograd.set_detect_anomaly(True)
+    for epoch in range(1,100):
+        for images,targets in tqdm(dataloader,file=sys.stdout,position=0,colour="green",desc=f"Epoch: {epoch}/99"):
             images = images.to("cuda")
             optimizer.zero_grad()
             #启用混合精度上下文
@@ -327,7 +331,7 @@ if __name__ == '__main__':
                 preds = model(images)
                 loss_dict = criterion(preds,targets,epoch)
                 losses = loss_dict['losses'] * images.shape[0]
-                print_memory_usage()
+                #print_memory_usage()
             #缩放损失并反向传播
             scaler.scale(losses).backward()
             #梯度裁剪
@@ -337,11 +341,10 @@ if __name__ == '__main__':
             scaler.step(optimizer)
             #调整缩放因子
             scaler.update()
-            torch.cuda.empty_cache()
-            if epoch >= 9:
-                print(
-                    f"Epoch: {epoch}, Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']},loss_box_aux{loss_dict['loss_box_aux']}")
+            #torch.cuda.empty_cache()
+            if epoch >= 49:
+                tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']},loss_box_aux:{loss_dict['loss_box_aux']}")
             else:
-                print(f"Epoch: {epoch}, Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']}")
-        torch.save(model.state_dict(),"model1")
+                tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']}")
+        torch.save(model.state_dict(),f"models{epoch}")
     #model.load_state_dict(torch.load('model'))
