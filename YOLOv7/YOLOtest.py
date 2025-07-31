@@ -11,14 +11,54 @@ from loss import Criterion
 from basebone.ELANNet_Tiny import ELANNet_Tiny
 from tqdm import tqdm
 import sys
+import math
 
+def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
+    # Returns Intersection over Union (IoU) of box1(1,4) to box2(n,4)
+
+    # Get the coordinates of bounding boxes
+    if xywh:  # transform from xywh to xyxy
+        (x1, y1, w1, h1), (x2, y2, w2, h2) = box1.chunk(4, -1), box2.chunk(4, -1)
+        w1_, h1_, w2_, h2_ = w1 / 2, h1 / 2, w2 / 2, h2 / 2
+        b1_x1, b1_x2, b1_y1, b1_y2 = x1 - w1_, x1 + w1_, y1 - h1_, y1 + h1_
+        b2_x1, b2_x2, b2_y1, b2_y2 = x2 - w2_, x2 + w2_, y2 - h2_, y2 + h2_
+    else:  # x1, y1, x2, y2 = box1
+        b1_x1, b1_y1, b1_x2, b1_y2 = box1.chunk(4, -1)
+        b2_x1, b2_y1, b2_x2, b2_y2 = box2.chunk(4, -1)
+        w1, h1 = b1_x2 - b1_x1, b1_y2 - b1_y1 + eps
+        w2, h2 = b2_x2 - b2_x1, b2_y2 - b2_y1 + eps
+
+    # Intersection area
+    inter = (b1_x2.minimum(b2_x2) - b1_x1.maximum(b2_x1)).clamp(0) * \
+            (b1_y2.minimum(b2_y2) - b1_y1.maximum(b2_y1)).clamp(0)
+
+    # Union Area
+    union = w1 * h1 + w2 * h2 - inter + eps
+
+    # IoU
+    iou = inter / union
+    if CIoU or DIoU or GIoU:
+        cw = b1_x2.maximum(b2_x2) - b1_x1.minimum(b2_x1)  # convex (smallest enclosing box) width
+        ch = b1_y2.maximum(b2_y2) - b1_y1.minimum(b2_y1)  # convex height
+        if CIoU or DIoU:  # Distance or Complete IoU https://arxiv.org/abs/1911.08287v1
+            c2 = cw ** 2 + ch ** 2 + eps  # convex diagonal squared
+            rho2 = ((b2_x1 + b2_x2 - b1_x1 - b1_x2) ** 2 + (b2_y1 + b2_y2 - b1_y1 - b1_y2) ** 2) / 4  # center dist ** 2
+            if CIoU:  # https://github.com/Zzh-tju/DIoU-SSD-pytorch/blob/master/utils/box/box_utils.py#L47
+                v = (4 / math.pi ** 2) * (torch.atan(w2 / h2) - torch.atan(w1 / h1)).pow(2)
+                with torch.no_grad():
+                    alpha = v / (v - iou + (1 + eps))
+                return iou - (rho2 / c2 + v * alpha)  # CIoU
+            return iou - rho2 / c2  # DIoU
+        c_area = cw * ch + eps  # convex area
+        return iou - (c_area - union) / c_area  # GIoU https://arxiv.org/pdf/1902.09630.pdf
+    return iou  # IoU
 
 class YOLO(nn.Module):
     def __init__(self,
                  device = "cuda",
                  num_classes=5,
-                 confidence_thresh=0.3,
-                 nms_thresh=0.4,
+                 confidence_thresh=0.4,
+                 nms_thresh=0.3,
                  topk=1000,
                  trainable=False,
                  depthwise = False):
@@ -180,7 +220,7 @@ class YOLO(nn.Module):
     #     anchor_xy *= self.stride[level]
     #     anchors = anchor_xy.to(self.device)
     #     return anchors
-    def generate_anchors(self, level, fmp_size):
+    def  generate_anchors(self, level, fmp_size):
         fmp_h, fmp_w = fmp_size
         # 生成归一化网格坐标 [0,1]
         y, x = torch.meshgrid(
@@ -198,11 +238,11 @@ class YOLO(nn.Module):
         """
         只保留得分最高的边界框，并移除与其重叠度较高的其他边框（针对单个类别）
         """
-        x1 = bounding_box[:,0]
-        y1 = bounding_box[:,1]
-        x2 = bounding_box[:,2]
-        y2 = bounding_box[:,3]
-        areas = (x2 - x1) * (y2 - y1)
+        # x1 = bounding_box[:,0]
+        # y1 = bounding_box[:,1]
+        # x2 = bounding_box[:,2]
+        # y2 = bounding_box[:,3]
+        # areas = (x2 - x1) * (y2 - y1)
         #将得分进行排序，得分最大的索引值放在最前面,[::-1]表示反转数列
         order = scores.argsort()[::-1]
         keep = []
@@ -215,22 +255,35 @@ class YOLO(nn.Module):
             #[::-1]表示反转序列顺序
             i = order[0]
             keep.append(i)
-            #计算交集的左上角点和右下角点的坐标
-            #maximum是比较取值，去最大的作为返回值，如果是数与数组比较，则返回数组，数组中比数小的被数取代
-            xx1 = np.maximum(x1[i],x1[order[1:]])
-            yy1 = np.maximum(y1[i],y1[order[1:]])
-            xx2 = np.minimum(x2[i],x2[order[1:]])
-            yy2 = np.minimum(y2[i],y2[order[1:]])
-            #计算交集的宽和高
-            w = np.maximum(1e-10,xx2-xx1)
-            h = np.maximum(1e-10,yy2-yy1)
-            #计算交集的面积
-            inter = w * h
-            #计算交并比
-            iou = inter/ (areas[i] +areas[order[1:]] - inter + 1e-14)
+            # #计算交集的左上角点和右下角点的坐标
+            # #maximum是比较取值，去最大的作为返回值，如果是数与数组比较，则返回数组，数组中比数小的被数取代
+            # xx1 = np.maximum(x1[i],x1[order[1:]])
+            # yy1 = np.maximum(y1[i],y1[order[1:]])
+            # xx2 = np.minimum(x2[i],x2[order[1:]])
+            # yy2 = np.minimum(y2[i],y2[order[1:]])
+            # #计算交集的宽和高
+            # w = np.maximum(1e-10,xx2-xx1)
+            # h = np.maximum(1e-10,yy2-yy1)
+            # #计算交集的面积
+            # inter = w * h
+            # union_area = areas[i] +areas[order[1:]] - inter + 1e-14
+            # #计算交并比
+            # iou = inter / union_area
+            # encl_x1 = np.minimum(x1[i],x1[order[1:]])
+            # encl_y1 = np.minimum(y1[i],y1[order[1:]])
+            # encl_x2 = np.maximum(x2[i],x2[order[1:]])
+            # encl_y2 = np.maximum(y2[i],y2[order[1:]])
+            # encl_w = encl_x2 - encl_x1
+            # encl_h = encl_y2 - encl_y1
+            # encl_area = encl_w * encl_h
+            # giou = iou - (encl_area - union_area) / (encl_area + 1e-10)
+            current_box = bounding_box[i].reshape(1,4)
+            other_boxes = bounding_box[order[1:]]
+            ciou = bbox_iou(torch.tensor(current_box),torch.tensor(other_boxes),xywh=False,CIoU=True)
+            ciou = ciou.cpu().numpy()
             #滤除超过NMS阈值的边界框
             #np.where返回一个元组，元组的第一个元素是符合条件的索引值列表
-            inds = np.where(iou <= self.nms_thresh)[0]
+            inds = np.where(ciou <= self.nms_thresh)[0]
             order = order[inds + 1]#将符合条件的边界框取下来继续选，
             # 为什么加一，是因为iou是除了第一个边界框以外的数组，相比order只少了第一个边界框，加了一后便能把符合条件的索引值全部拿走，丢掉不符合条件的
         return keep
@@ -296,9 +349,9 @@ def print_memory_usage():
 if __name__ == '__main__':
     model = YOLO(trainable=True,depthwise=True).cuda()
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(),lr = 0.01)
+    optimizer = torch.optim.Adam(model.parameters(),lr = 0.001)
     criterion = Criterion("cuda",num_classes=5)
-    model.load_state_dict(torch.load('models0'))
+    model.load_state_dict(torch.load('modelx31'))
     n_p = sum(x.numel() for x in model.parameters())
     print(n_p/(1024 ** 2))
     #梯度缩放器
@@ -322,7 +375,7 @@ if __name__ == '__main__':
                 collate_fn=collate_fn
             )
     #torch.autograd.set_detect_anomaly(True)
-    for epoch in range(1,100):
+    for epoch in range(32,100):
         for images,targets in tqdm(dataloader,file=sys.stdout,position=0,colour="green",desc=f"Epoch: {epoch}/99"):
             images = images.to("cuda")
             optimizer.zero_grad()
@@ -346,5 +399,5 @@ if __name__ == '__main__':
                 tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']},loss_box_aux:{loss_dict['loss_box_aux']}")
             else:
                 tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']}")
-        torch.save(model.state_dict(),f"models{epoch}")
+        torch.save(model.state_dict(),f"modelx{epoch}")
     #model.load_state_dict(torch.load('model'))

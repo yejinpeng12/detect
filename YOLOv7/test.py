@@ -120,7 +120,7 @@ def visualize_predictions(image_vis, bboxes, labels, scores, orig_size):
 
 if __name__ == "__main__":
     model = YOLO(trainable=False, depthwise=True).cuda()
-    model.load_state_dict(torch.load('models9'))
+    model.load_state_dict(torch.load('modelx49'))
 
     n_p = sum(x.numel() for x in model.parameters())
     print(f"{n_p / (1024 ** 2):.2f}",end=' ')

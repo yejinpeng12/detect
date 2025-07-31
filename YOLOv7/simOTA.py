@@ -1,10 +1,43 @@
+from ctypes import c_wchar
+
 import torch
 import torch.nn.functional as F
 from torchvision.ops.boxes import box_area
+import math
 
+def bbox_iou(boxes1,boxes2,CIoU=False,eps=1e-7):
+    area1 = box_area(boxes1)
+    area2 = box_area(boxes2)
+
+    lt = torch.max(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
+    rb = torch.min(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
+
+    wh = (rb - lt).clamp(min=0)  # [N,M,2]
+    inter = wh[:, :, 0] * wh[:, :, 1]  # [N,M]
+
+    union = area1[:, None] + area2 - inter
+
+    iou = inter / union.clamp(min=1e-8)
+    if CIoU:
+        c_w = torch.max(boxes1[:,None,2],boxes2[:,2]) - torch.min(boxes1[:,None,0],boxes2[:,0])
+        c_h = torch.max(boxes1[:,None,3],boxes2[:,3]) - torch.min(boxes1[:,None,1],boxes2[:,1])
+        c2 = c_h ** 2 + c_w ** 2 + eps
+        gt_wh = (boxes1[:,None,2:] - boxes1[:,None,:2])
+        pred_wh = (boxes2[None,:,2:] - boxes2[None,:,:2])
+        rho2 = ((boxes1[:,None,0] + boxes1[:,None,2] - boxes2[:,0] - boxes2[:,2])**2 +
+                (boxes1[:,None,1] + boxes1[:,None,3] - boxes2[:,1] - boxes2[:,3])**2) / 4
+        v = (4 / math.pi ** 2) * (torch.atan(gt_wh[:,:,0]/gt_wh[:,:,1]) - torch.atan(pred_wh[:,:,0]/pred_wh[:,:,1])).pow(2)
+        alpha = v / (v - iou + (1 + eps))
+        return iou - (rho2 / c2 + v * alpha)
+    else:
+        return iou
 def box_iou(boxes1, boxes2):
     area1 = box_area(boxes1)
     area2 = box_area(boxes2)
+    print("gt_area:",area1.shape)
+    print("pred_area:",area2.shape)
+    print("gt:",boxes1.shape)
+    print("pred:",boxes2.shape)
 
     lt = torch.max(boxes1[:, None, :2], boxes2[:, :2])  # [N,M,2]
     rb = torch.min(boxes1[:, None, 2:], boxes2[:, 2:])  # [N,M,2]
@@ -51,9 +84,10 @@ class SimOTA(object):
         box_preds = pred_box[fg_mask].float()  # [Mp, 4]
 
         # ----------------------- Reg cost -----------------------
-        pair_wise_ious, _ = box_iou(tgt_bboxes, box_preds)  # [N, Mp]
+        pair_wise_ious = bbox_iou(tgt_bboxes, box_preds,CIoU=False)  # [N, Mp]
+        #pair_wise_ious,_ = box_iou(tgt_bboxes, box_preds)
         reg_cost = -torch.log(pair_wise_ious + 1e-8)  # [N, Mp]
-
+        #reg_cost = -torch.log((1.0 + pair_wise_ious) / 2 + 1e-8)
         # ----------------------- Cls cost -----------------------
         with torch.amp.autocast('cuda',enabled=False):
             # [Mp, C]
