@@ -57,9 +57,9 @@ class YOLO(nn.Module):
     def __init__(self,
                  device = "cuda",
                  num_classes=5,
-                 confidence_thresh=0.4,
-                 nms_thresh=0.3,
-                 topk=1000,
+                 confidence_thresh=0.5,
+                 nms_thresh=0.2,
+                 topk=100,
                  trainable=False,
                  depthwise = False):
         super().__init__()
@@ -71,10 +71,10 @@ class YOLO(nn.Module):
         self.topk = topk
         self.trainable = trainable
         #主干网络
-        self.backbone = ELANNet_Tiny(depthwise=depthwise)
+        self.backbone = ELANNet_Tiny(depthwise=False)
         self.neck_dims = self.backbone.feat_dims[-3:]
         #颈部网络
-        self.neck = SPPFBlockCSP(in_dim=self.neck_dims[-1],out_dim=self.neck_dims[-1]//2,depthwise=depthwise)
+        self.neck = SPPFBlockCSP(in_dim=self.neck_dims[-1],out_dim=self.neck_dims[-1]//2,depthwise=False)
         self.neck_dims[-1] = self.neck_dims[-1]//2
         #颈部网络：特征金字塔
         self.fpn = YOLOv7PaFPN(self.neck_dims,None,depthwise=depthwise)
@@ -349,9 +349,9 @@ def print_memory_usage():
 if __name__ == '__main__':
     model = YOLO(trainable=True,depthwise=True).cuda()
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(),lr = 0.001)
+    optimizer = torch.optim.Adam(model.parameters(),lr = 0.01)
     criterion = Criterion("cuda",num_classes=5)
-    model.load_state_dict(torch.load('modelx31'))
+    model.load_state_dict(torch.load('modelq9'))
     n_p = sum(x.numel() for x in model.parameters())
     print(n_p/(1024 ** 2))
     #梯度缩放器
@@ -375,7 +375,7 @@ if __name__ == '__main__':
                 collate_fn=collate_fn
             )
     #torch.autograd.set_detect_anomaly(True)
-    for epoch in range(32,100):
+    for epoch in range(10,100):
         for images,targets in tqdm(dataloader,file=sys.stdout,position=0,colour="green",desc=f"Epoch: {epoch}/99"):
             images = images.to("cuda")
             optimizer.zero_grad()
@@ -399,5 +399,5 @@ if __name__ == '__main__':
                 tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']},loss_box_aux:{loss_dict['loss_box_aux']}")
             else:
                 tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']}")
-        torch.save(model.state_dict(),f"modelx{epoch}")
+        torch.save(model.state_dict(),f"modelq{epoch}")
     #model.load_state_dict(torch.load('model'))

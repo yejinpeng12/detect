@@ -8,7 +8,7 @@ class ELANNet_Tiny(nn.Module):
         # -------------- Basic parameters --------------
         self.feat_dims = [32, 64, 128, 256, 512]
         self.squeeze_ratios = [0.5, 0.5, 0.5, 0.5]  # Stage-1 -> Stage-4
-        self.branch_depths = [1, 1, 1, 1]  # Stage-1 -> Stage-4
+        self.branch_depths = [2, 2, 2, 2]  # Stage-1 -> Stage-4
 
         # -------------- Network parameters --------------
         ## P1/2

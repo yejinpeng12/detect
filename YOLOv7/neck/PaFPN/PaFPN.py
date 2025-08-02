@@ -5,7 +5,7 @@ from YOLOv7.basebone.Downsample import Downsample
 import torch.nn.functional as F
 import torch
 class YOLOv7PaFPN(nn.Module):
-    def __init__(self,in_dims,out_dim,channel_width = 0.75,norm_type='BN',act_type='silu',depthwise=False):
+    def __init__(self,in_dims,out_dim,channel_width = 0.5,norm_type='BN',act_type='silu',depthwise=False):
         super().__init__()
         self.in_dims = in_dims
         self.channel_width = channel_width
@@ -25,9 +25,9 @@ class YOLOv7PaFPN(nn.Module):
         self.downsample_layer_2 = Downsample(in_dim=round(256*channel_width),out_dim= round(512*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
         self.bottom_up_layer_2 = ELANBlockFPN(in_dim=round(512*channel_width)+c5,out_dim=round(512*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
 
-        self.head_conv_1 = Conv(round(128*channel_width), round(256*channel_width),k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
-        self.head_conv_2 = Conv(round(256*channel_width), round(512*channel_width),k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
-        self.head_conv_3 = Conv(round(512*channel_width), round(1024*channel_width),k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.head_conv_1 = Conv(round(128*channel_width), round(256*channel_width),k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=False)
+        self.head_conv_2 = Conv(round(256*channel_width), round(512*channel_width),k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=False)
+        self.head_conv_3 = Conv(round(512*channel_width), round(1024*channel_width),k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=False)
 
         if out_dim is not None:
             self.out_layers = nn.ModuleList([

@@ -120,10 +120,10 @@ def visualize_predictions(image_vis, bboxes, labels, scores, orig_size):
 
 if __name__ == "__main__":
     model = YOLO(trainable=False, depthwise=True).cuda()
-    model.load_state_dict(torch.load('modelx49'))
+    model.load_state_dict(torch.load('modelq21'))
 
     n_p = sum(x.numel() for x in model.parameters())
-    print(f"{n_p / (1024 ** 2):.2f}",end=' ')
+    print(f"{n_p:.2f}",end=' ')
 
     flops_g, params_m = calculate_flops(model, input_size=(640, 640))
     print(f"{flops_g:.2f}")
@@ -132,7 +132,7 @@ if __name__ == "__main__":
     image_vis_dir = '../val/vis'
     dataset = ImageDataset(image_ir_dir, image_vis_dir)
     dataloader = DataLoader(dataset,batch_size=1,shuffle=True)
-    with open('result1.txt','w') as f:
+    with open('result.txt','w') as f:
         f.write(f"{n_p} {flops_g}\n")
         for image,name,scale,wh,padding in dataloader:
             image = image.to('cuda')
@@ -142,11 +142,11 @@ if __name__ == "__main__":
                 print(name[0], end=' ')
                 all_boxes = []
                 all_labels = []
-                for i,j in zip(bboxes,labels):
+                for k,i,j in zip(scores,bboxes,labels):
                     i = transformer(i,scale, padding,wh)
                     array = xyxy_to_xywh(i)
-                    f.write(f"{array[0]} {array[1]} {array[2]} {array[3]} {j} ")
-                    print(array[0], array[1], array[2], array[3], j, end=' ')
+                    f.write(f"{array[0]} {array[1]} {array[2]} {array[3]} {k} {j} ")
+                    print(array[0], array[1], array[2], array[3], k, j, end=' ')
                     all_boxes.append(i)
                     all_labels.append(j)
                 f.write("\n")
@@ -158,5 +158,5 @@ if __name__ == "__main__":
 
                 # 可视化
                 visualize_predictions(orig_image, all_boxes, all_labels, scores,
-                                      (wh[0].item(), wh[1].item()))
+                                     (wh[0].item(), wh[1].item()))
                 break
