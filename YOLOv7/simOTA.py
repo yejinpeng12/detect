@@ -198,7 +198,6 @@ class SimOTA(object):
         ious_in_boxes_matrix = pair_wise_ious
         n_candidate_k = min(self.topk_candidate, ious_in_boxes_matrix.size(1))
         #ious_in_boxes_matrix.size(1)取Mp
-        #ious_in_boxes_matrix = torch.clamp(ious_in_boxes_matrix, 0.0, 1.0)
         topk_ious, _ = torch.topk(ious_in_boxes_matrix, n_candidate_k, dim=1)
         #torch.topk()用于从张量中选取前 k 个最大值（或最小值）及其索引
         dynamic_ks = torch.clamp(topk_ious.sum(1).int(), min=1)

@@ -57,8 +57,8 @@ class YOLO(nn.Module):
     def __init__(self,
                  device = "cuda",
                  num_classes=5,
-                 confidence_thresh=0.5,
-                 nms_thresh=0.2,
+                 confidence_thresh=0.6,
+                 nms_thresh=0.5,
                  topk=100,
                  trainable=False,
                  depthwise = False):
@@ -349,9 +349,9 @@ def print_memory_usage():
 if __name__ == '__main__':
     model = YOLO(trainable=True,depthwise=True).cuda()
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(),lr = 0.01)
+    optimizer = torch.optim.Adam(model.parameters(),lr = 0.0001)
     criterion = Criterion("cuda",num_classes=5)
-    model.load_state_dict(torch.load('modelq9'))
+    model.load_state_dict(torch.load('modelw25'))
     n_p = sum(x.numel() for x in model.parameters())
     print(n_p/(1024 ** 2))
     #梯度缩放器
@@ -375,7 +375,7 @@ if __name__ == '__main__':
                 collate_fn=collate_fn
             )
     #torch.autograd.set_detect_anomaly(True)
-    for epoch in range(10,100):
+    for epoch in range(26,100):
         for images,targets in tqdm(dataloader,file=sys.stdout,position=0,colour="green",desc=f"Epoch: {epoch}/99"):
             images = images.to("cuda")
             optimizer.zero_grad()
@@ -399,5 +399,5 @@ if __name__ == '__main__':
                 tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']},loss_box_aux:{loss_dict['loss_box_aux']}")
             else:
                 tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']}")
-        torch.save(model.state_dict(),f"modelq{epoch}")
+        torch.save(model.state_dict(),f"modelw{epoch}")
     #model.load_state_dict(torch.load('model'))

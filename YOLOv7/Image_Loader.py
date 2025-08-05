@@ -6,7 +6,11 @@ from torch.utils.data import Dataset, DataLoader
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
+import matplotlib as mpl
 
+# 指定支持中文的字体（按优先级尝试）
+mpl.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'KaiTi', 'Arial Unicode MS']
+mpl.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 test_ClASS = ['person','cyclist','car','truck','bus']
 target_size = (640,640)
 def resize_aspect_ratio(image):

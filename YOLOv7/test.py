@@ -120,7 +120,7 @@ def visualize_predictions(image_vis, bboxes, labels, scores, orig_size):
 
 if __name__ == "__main__":
     model = YOLO(trainable=False, depthwise=True).cuda()
-    model.load_state_dict(torch.load('modelq21'))
+    model.load_state_dict(torch.load('modelw25'))
 
     n_p = sum(x.numel() for x in model.parameters())
     print(f"{n_p:.2f}",end=' ')
@@ -132,7 +132,7 @@ if __name__ == "__main__":
     image_vis_dir = '../val/vis'
     dataset = ImageDataset(image_ir_dir, image_vis_dir)
     dataloader = DataLoader(dataset,batch_size=1,shuffle=True)
-    with open('result.txt','w') as f:
+    with open('result1.txt','w') as f:
         f.write(f"{n_p} {flops_g}\n")
         for image,name,scale,wh,padding in dataloader:
             image = image.to('cuda')
@@ -158,5 +158,5 @@ if __name__ == "__main__":
 
                 # 可视化
                 visualize_predictions(orig_image, all_boxes, all_labels, scores,
-                                     (wh[0].item(), wh[1].item()))
+                                    (wh[0].item(), wh[1].item()))
                 break
