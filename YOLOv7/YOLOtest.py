@@ -96,15 +96,15 @@ class YOLO(nn.Module):
                             [nn.Conv2d(head.reg_out_dim, 4, kernel_size=1)
                                 for head in self.head])
 
-    def decode_box(self, reg_pred, anchors, fmp_size):
-        # 归一化解码
-        grid_scale = 1.0 / torch.tensor(fmp_size, device=reg_pred.device)
-        ctr_pred = reg_pred[..., :2].sigmoid() * grid_scale + anchors[..., :2]
-        wh_pred = torch.exp(reg_pred[..., 2:].clamp(max=5)) * grid_scale
-        return torch.cat([
-            (ctr_pred - wh_pred / 2).clamp(0, 1),
-            (ctr_pred + wh_pred / 2).clamp(0, 1)
-        ], dim=-1)
+    # def decode_box(self, reg_pred, anchors, fmp_size):
+    #     # 归一化解码
+    #     grid_scale = 1.0 / torch.tensor(fmp_size, device=reg_pred.device)
+    #     ctr_pred = reg_pred[..., :2].sigmoid() * grid_scale + anchors[..., :2]
+    #     wh_pred = torch.exp(reg_pred[..., 2:].clamp(max=5)) * grid_scale
+    #     return torch.cat([
+    #         (ctr_pred - wh_pred / 2).clamp(0, 1),
+    #         (ctr_pred + wh_pred / 2).clamp(0, 1)
+    #     ], dim=-1)
     @torch.no_grad()
     def inference_single_image(self,x):
         x1 = self.backbone(x)
@@ -131,13 +131,13 @@ class YOLO(nn.Module):
             cls_pred = cls_pred[0].permute(1, 2, 0).contiguous().view(-1, self.num_classes)
             reg_pred = reg_pred[0].permute(1, 2, 0).contiguous().view(-1, 4)
 
-            # decode bbox
-            # ctr_pred = reg_pred[..., :2] * self.stride[level] + anchors[..., :2]
-            # wh_pred = torch.exp(reg_pred[..., 2:]) * self.stride[level]
-            # pred_x1y1 = ctr_pred - wh_pred * 0.5
-            # pred_x2y2 = ctr_pred + wh_pred * 0.5
-            # box_pred = torch.cat([pred_x1y1, pred_x2y2], dim=-1)
-            box_pred = self.decode_box(reg_pred,anchors,fmp_size)
+            #decode bbox
+            ctr_pred = reg_pred[..., :2] * self.stride[level] + anchors[..., :2]
+            wh_pred = torch.exp(reg_pred[..., 2:]) * self.stride[level]
+            pred_x1y1 = ctr_pred - wh_pred * 0.5
+            pred_x2y2 = ctr_pred + wh_pred * 0.5
+            box_pred = torch.cat([pred_x1y1, pred_x2y2], dim=-1)
+            #box_pred = self.decode_box(reg_pred,anchors,fmp_size)
 
             all_obj_preds.append(obj_pred)
             all_cls_preds.append(cls_pred)
@@ -184,12 +184,12 @@ class YOLO(nn.Module):
                 cls_pred = cls_pred.permute(0, 2, 3, 1).contiguous().view(b, -1, self.num_classes)
                 reg_pred = reg_pred.permute(0, 2, 3, 1).contiguous().view(b, -1, 4)
                 # decode bbox
-                # ctr_pred = reg_pred[..., :2] * self.stride[level] + anchors[..., :2]
-                # wh_pred = torch.exp(reg_pred[..., 2:]) * self.stride[level]
-                # pred_x1y1 = ctr_pred - wh_pred * 0.5
-                # pred_x2y2 = ctr_pred + wh_pred * 0.5
-                # box_pred = torch.cat([pred_x1y1, pred_x2y2], dim=-1)
-                box_pred = self.decode_box(reg_pred,anchors,fmp_size)
+                ctr_pred = reg_pred[..., :2] * self.stride[level] + anchors[..., :2]
+                wh_pred = torch.exp(reg_pred[..., 2:]) * self.stride[level]
+                pred_x1y1 = ctr_pred - wh_pred * 0.5
+                pred_x2y2 = ctr_pred + wh_pred * 0.5
+                box_pred = torch.cat([pred_x1y1, pred_x2y2], dim=-1)
+                #box_pred = self.decode_box(reg_pred,anchors,fmp_size)
                 # print("box_pred min:", reg_pred.min().item())
                 # print("box_pred max:", reg_pred.max().item())
 
@@ -212,26 +212,26 @@ class YOLO(nn.Module):
 
             return outputs
 
-    # def generate_anchors(self,level,fmp_size):
-    #     fmp_h, fmp_w = fmp_size
-    #     anchor_y, anchor_x = torch.meshgrid([torch.arange(fmp_h,device=self.device),torch.arange(fmp_w,device=self.device)],indexing='ij')
-    #     anchor_xy = torch.stack([anchor_x,anchor_y],dim=-1).float().view(-1,2)
-    #     anchor_xy += 0.5
-    #     anchor_xy *= self.stride[level]
-    #     anchors = anchor_xy.to(self.device)
-    #     return anchors
-    def  generate_anchors(self, level, fmp_size):
+    def generate_anchors(self,level,fmp_size):
         fmp_h, fmp_w = fmp_size
-        # 生成归一化网格坐标 [0,1]
-        y, x = torch.meshgrid(
-            torch.linspace(0, 1, fmp_h, device=self.device),
-            torch.linspace(0, 1, fmp_w, device=self.device),
-            indexing='ij'
-        )
-        anchor_xy = torch.stack([x, y], dim=-1).view(-1, 2)
-        # 中心对齐补偿
-        anchor_xy += 0.5 / min(fmp_h, fmp_w)
-        return anchor_xy
+        anchor_y, anchor_x = torch.meshgrid([torch.arange(fmp_h,device=self.device),torch.arange(fmp_w,device=self.device)],indexing='ij')
+        anchor_xy = torch.stack([anchor_x,anchor_y],dim=-1).float().view(-1,2)
+        anchor_xy += 0.5
+        anchor_xy *= self.stride[level]
+        anchors = anchor_xy.to(self.device)
+        return anchors
+    # def  generate_anchors(self, level, fmp_size):
+    #     fmp_h, fmp_w = fmp_size
+    #     # 生成归一化网格坐标 [0,1]
+    #     y, x = torch.meshgrid(
+    #         torch.linspace(0, 1, fmp_h, device=self.device),
+    #         torch.linspace(0, 1, fmp_w, device=self.device),
+    #         indexing='ij'
+    #     )
+    #     anchor_xy = torch.stack([x, y], dim=-1).view(-1, 2)
+    #     # 中心对齐补偿
+    #     anchor_xy += 0.5 / min(fmp_h, fmp_w)
+    #     return anchor_xy
 
     #非极大值抑制操作
     def nms(self,bounding_box,scores):
@@ -349,13 +349,13 @@ def print_memory_usage():
 if __name__ == '__main__':
     model = YOLO(trainable=True,depthwise=True).cuda()
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(),lr = 0.0001)
+    optimizer = torch.optim.Adam(model.parameters(),lr = 0.001)
     criterion = Criterion("cuda",num_classes=5)
-    model.load_state_dict(torch.load('modelw25'))
+    model.load_state_dict(torch.load('modelw14'))
     n_p = sum(x.numel() for x in model.parameters())
     print(n_p/(1024 ** 2))
     #梯度缩放器
-    scaler = GradScaler(init_scale=2.0**1,#降低初始缩放因子
+    scaler = GradScaler(init_scale=2.0**15,#降低初始缩放因子
                         growth_factor=2.0,#降低增长因子
                         backoff_factor=0.5#提高回退因子
                         )
@@ -375,15 +375,15 @@ if __name__ == '__main__':
                 collate_fn=collate_fn
             )
     #torch.autograd.set_detect_anomaly(True)
-    for epoch in range(26,100):
+    for epoch in range(15,100):
         for images,targets in tqdm(dataloader,file=sys.stdout,position=0,colour="green",desc=f"Epoch: {epoch}/99"):
             images = images.to("cuda")
             optimizer.zero_grad()
             #启用混合精度上下文
-            with autocast("cuda",enabled=False,dtype=torch.float16):
+            with autocast("cuda",enabled=True,dtype=torch.float16):
                 preds = model(images)
                 loss_dict = criterion(preds,targets,epoch)
-                losses = loss_dict['losses'] * images.shape[0]
+                losses = loss_dict['losses']
                 #print_memory_usage()
             #缩放损失并反向传播
             scaler.scale(losses).backward()
@@ -400,4 +400,3 @@ if __name__ == '__main__':
             else:
                 tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']}")
         torch.save(model.state_dict(),f"modelw{epoch}")
-    #model.load_state_dict(torch.load('model'))

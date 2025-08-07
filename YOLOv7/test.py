@@ -9,6 +9,7 @@ from thop import profile
 from copy import deepcopy
 import numpy as np
 
+
 def xyxy_to_xywh(bboxes):
     """
     输入: 一维数组 [x1, y1, x2, y2]
@@ -20,7 +21,7 @@ def xyxy_to_xywh(bboxes):
     height = bboxes[3] - bboxes[1]
     return np.array([x_center, y_center, width, height])
 def transformer(bboxes,scale,padding,wh):
-    bboxes *= 640
+    #bboxes *= 640
     bboxes[0] -= padding[0]
     bboxes[1] -= padding[1]
     bboxes[2] -= padding[0]
@@ -131,7 +132,7 @@ if __name__ == "__main__":
     image_ir_dir = '../val/ir'
     image_vis_dir = '../val/vis'
     dataset = ImageDataset(image_ir_dir, image_vis_dir)
-    dataloader = DataLoader(dataset,batch_size=1,shuffle=True)
+    dataloader = DataLoader(dataset,batch_size=1,shuffle=False)
     with open('result1.txt','w') as f:
         f.write(f"{n_p} {flops_g}\n")
         for image,name,scale,wh,padding in dataloader:
@@ -153,10 +154,10 @@ if __name__ == "__main__":
                 print()
                 # 可视化预测结果
                 # 加载原始可见光图像
-                orig_image_path = os.path.join(image_vis_dir, name[0])
-                orig_image = Image.open(orig_image_path).convert('RGB')
+                #orig_image_path = os.path.join(image_vis_dir, name[0])
+                #orig_image = Image.open(orig_image_path).convert('RGB')
 
                 # 可视化
-                visualize_predictions(orig_image, all_boxes, all_labels, scores,
-                                    (wh[0].item(), wh[1].item()))
-                break
+                #visualize_predictions(orig_image, all_boxes, all_labels, scores,
+                #                    (wh[0].item(), wh[1].item()))
+                #break
