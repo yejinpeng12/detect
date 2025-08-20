@@ -8,6 +8,7 @@ import torchvision
 from thop import profile
 from copy import deepcopy
 import numpy as np
+import cv2
 
 
 def xyxy_to_xywh(bboxes):
@@ -52,6 +53,16 @@ def calculate_flops(model, input_size=(640, 640), device='cuda'):
 
     # 转换为GFLOPs和百万参数
     return flops / 1e9, params / 1e6  # 返回GFLOPs和百万参数
+def weighted_average_fusion(ir_img, vis_img,ir_weight=0.6):
+    # 单通道处理
+    if len(ir_img.shape) == 2:
+        ir_img = cv2.cvtColor(ir_img, cv2.COLOR_GRAY2BGR)
+    if len(vis_img.shape) == 2:
+        vis_img = cv2.cvtColor(vis_img, cv2.COLOR_GRAY2BGR)
+    h, w = ir_img.shape[:2]
+    fused = cv2.addWeighted(ir_img, ir_weight, vis_img, 1 - ir_weight, 0)
+
+    return fused
 class ImageDataset(Dataset):
     def __init__(self,image_ir_dir,image_vis_dir):
         self.image_ir_dir = image_ir_dir
@@ -74,9 +85,13 @@ class ImageDataset(Dataset):
         padded_vis,padding = pad_to_target_size(resized_vis)
         padded_ir,_ = pad_to_target_size(resized_ir)
 
-        image_vis_tensor = self.to_tensor(padded_vis)
-        image_ir_tensor = self.to_tensor(padded_ir)
-        image = torch.cat([image_vis_tensor,image_ir_tensor],dim=0)
+        # padded_vis = np.array(padded_vis)
+        # padded_ir = np.array(padded_ir)
+        # image = weighted_average_fusion(padded_ir,padded_vis)
+        # image = self.to_tensor(image)
+        padded_vis = self.to_tensor(padded_vis)
+        padded_ir = self.to_tensor(padded_ir)
+        image = torch.cat([padded_vis, padded_ir],dim=0)
         return image, name, scale, wh, padding
 
 
@@ -121,7 +136,7 @@ def visualize_predictions(image_vis, bboxes, labels, scores, orig_size):
 
 if __name__ == "__main__":
     model = YOLO(trainable=False, depthwise=True).cuda()
-    model.load_state_dict(torch.load('modelw25'))
+    model.load_state_dict(torch.load('config/rotate9'))#modelw25是mvp
 
     n_p = sum(x.numel() for x in model.parameters())
     print(f"{n_p:.2f}",end=' ')
@@ -129,8 +144,8 @@ if __name__ == "__main__":
     flops_g, params_m = calculate_flops(model, input_size=(640, 640))
     print(f"{flops_g:.2f}")
     model.eval()
-    image_ir_dir = '../val/ir'
-    image_vis_dir = '../val/vis'
+    image_ir_dir = '../val2/ir'
+    image_vis_dir = '../val2/vis'
     dataset = ImageDataset(image_ir_dir, image_vis_dir)
     dataloader = DataLoader(dataset,batch_size=1,shuffle=False)
     with open('result1.txt','w') as f:
@@ -159,5 +174,5 @@ if __name__ == "__main__":
 
                 # 可视化
                 #visualize_predictions(orig_image, all_boxes, all_labels, scores,
-                #                    (wh[0].item(), wh[1].item()))
+                #                  (wh[0].item(), wh[1].item()))
                 #break

@@ -5,8 +5,8 @@ from YOLOv7.basebone.Downsample import Downsample
 import torch.nn.functional as F
 import torch
 class YOLOv7PaFPN(nn.Module):
-    def __init__(self,in_dims,out_dim,channel_width = 0.5,norm_type='BN',act_type='silu',depthwise=False):
-        super().__init__()
+    def __init__(self,in_dims,out_dim,channel_width = 1.0,norm_type='BN',act_type='silu',depthwise=False):
+        super().__init__()#0.5
         self.in_dims = in_dims
         self.channel_width = channel_width
         c3,c4,c5 = in_dims

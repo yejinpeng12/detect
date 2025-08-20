@@ -7,12 +7,103 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 import numpy as np
 import matplotlib as mpl
+import math
 
 # 指定支持中文的字体（按优先级尝试）
 mpl.rcParams['font.sans-serif'] = ['Microsoft YaHei', 'SimHei', 'KaiTi', 'Arial Unicode MS']
 mpl.rcParams['axes.unicode_minus'] = False  # 解决负号显示问题
 test_ClASS = ['person','cyclist','car','truck','bus']
-target_size = (640,640)
+target_size = (640, 640)
+
+
+def rotate_bbox(bbox, angle_degrees, image_size):
+    """旋转边界框坐标（最终修正版）
+
+    参数:
+        bbox: [x_min, y_min, x_max, y_max] 绝对坐标
+        angle_degrees: 旋转角度（顺时针为正）
+        image_size: (height, width)
+
+    返回:
+        旋转后的有效边界框 [x_min, y_min, x_max, y_max] 绝对坐标
+        保证 x_max > x_min 且 y_max > y_min
+    """
+    h, w = image_size
+    angle_rad = math.radians(angle_degrees)
+    cos = math.cos(angle_rad)
+    sin = math.sin(angle_rad)
+
+    # 计算图像中心点
+    center_x = w / 2
+    center_y = h / 2
+
+    # 获取边界框的四个角点
+    x_min, y_min, x_max, y_max = bbox
+    corners = [
+        [x_min, y_min],  # 左上
+        [x_max, y_min],  # 右上
+        [x_max, y_max],  # 右下
+        [x_min, y_max]  # 左下
+    ]
+
+    # 旋转每个角点
+    rotated_corners = []
+    for x, y in corners:
+        # 转换为相对于中心的坐标
+        x_rel = x - center_x
+        y_rel = y - center_y
+
+        # 应用旋转矩阵
+        x_rot = x_rel * cos + y_rel * sin
+        y_rot = -x_rel * sin + y_rel * cos
+
+        # 转换回绝对坐标
+        x_new = x_rot + center_x
+        y_new = y_rot + center_y
+        rotated_corners.append([x_new, y_new])
+
+    # 计算旋转后的边界框
+    rotated_corners = torch.tensor(rotated_corners)
+    x_coords = rotated_corners[:, 0]
+    y_coords = rotated_corners[:, 1]
+
+    # 计算初始新边界框
+    new_x_min = torch.clamp(torch.min(x_coords), 0, w - 1)
+    new_y_min = torch.clamp(torch.min(y_coords), 0, h - 1)
+    new_x_max = torch.clamp(torch.max(x_coords), 0, w - 1)
+    new_y_max = torch.clamp(torch.max(y_coords), 0, h - 1)
+
+    # 确保边界框有效性（最小尺寸为3像素）
+    if new_x_max - new_x_min < 3:
+        new_x_min = max(0, (new_x_min + new_x_max) / 2 - 1.5)
+        new_x_max = min(w - 1, (new_x_min + new_x_max) / 2 + 1.5)
+
+    if new_y_max - new_y_min < 3:
+        new_y_min = max(0, (new_y_min + new_y_max) / 2 - 1.5)
+        new_y_max = min(h - 1, (new_y_min + new_y_max) / 2 + 1.5)
+
+    return [new_x_min, new_y_min, new_x_max, new_y_max]
+class RotateAugmentation:
+    def __init__(self, max_angle=30):
+        self.max_angle = max_angle
+
+    def __call__(self, image, bboxes):
+        # 随机选择旋转角度
+        angle = torch.randint(-self.max_angle, self.max_angle + 1, (1,)).item()
+
+        # 旋转图像
+        rotation_transform = torchvision.transforms.RandomRotation(degrees=(angle, angle))
+        rotated_image = rotation_transform(image)
+
+        # 旋转边界框
+        rotated_bboxes = []
+        image_size = (640, 640)
+        for bbox in bboxes:
+            rotated_bbox = rotate_bbox(bbox, angle, image_size)
+            rotated_bboxes.append(rotated_bbox)
+
+        return rotated_image, torch.tensor(rotated_bboxes)
+
 def resize_aspect_ratio(image):
     width, height = image.size
     target_width, target_height = target_size
@@ -44,6 +135,8 @@ class Loader(Dataset):
         self.transform = transform
         self.image_files = os.listdir(image_ir_dir)
         self.to_tensor = torchvision.transforms.ToTensor()
+        self.color = torchvision.transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.3, hue=0.1)
+        self.rotate = RotateAugmentation()
     def __len__(self):
         return len(self.image_files)
     def __getitem__(self,index):
@@ -53,6 +146,7 @@ class Loader(Dataset):
 
         image_ir = Image.open(image_ir_path).convert('L')
         image_vis = Image.open(image_vis_path).convert('RGB')
+        image_vis = self.color(image_vis)
 
         resized_vis,scale,(orig_w,orig_h) = resize_aspect_ratio(image_vis)
         resized_ir,_,_ = resize_aspect_ratio(image_ir)
@@ -95,17 +189,10 @@ class Loader(Dataset):
                 y_max += padding_top
 
                 # Step 4: 重新归一化到目标尺寸
-                x_min /= target_size[0]
-                y_min /= target_size[1]
-                x_max /= target_size[0]
-                y_max /= target_size[1]
-
-                # Step 5: 边界检查（确保坐标在[0, 640]范围内）
-                # x_min = max(0, min(640, x_min))
-                # y_min = max(0, min(640, y_min))
-                # x_max = max(0, min(640, x_max))
-                # y_max = max(0, min(640, y_max))
-                # class_id = max(0,min(4,class_id))
+                # x_min /= target_size[0]
+                # y_min /= target_size[1]
+                # x_max /= target_size[0]
+                # y_max /= target_size[1]
 
                 # 确保x_max > x_min且y_max > y_min
                 if x_max <= x_min or y_max <= y_min:
@@ -115,6 +202,7 @@ class Loader(Dataset):
                 labels["boxes"].append([x_min,y_min,x_max,y_max])
         labels["labels"] = torch.tensor(labels["labels"])
         labels["boxes"] = torch.tensor(labels["boxes"])
+        image, labels["boxes"] = self.rotate(image,labels["boxes"])
         return image, labels
 
 def collate_fn(batch):
@@ -139,20 +227,6 @@ if __name__ == "__main__":
     image_vis_path = os.listdir(image_vis_dir)
 
     dataset = Loader(image_ir_dir,image_vis_dir,annotation_dir)
-    # dataloader = DataLoader(
-    #         dataset,
-    #         batch_size=16,
-    #         shuffle=True,
-    #         num_workers=0,
-    #         pin_memory=True,
-    #         collate_fn=collate_fn  # 处理变长标签
-    #     )
-    # for images, labels in dataloader:
-    #         print(f"Batch images shape: {images[0][0][0]}")  # [B, 4, H, W]
-    #         print(labels[0]['boxes'])
-    #         print(len(labels))
-    #         break
-
 
 def validate_annotations(dataset, num_samples=5, show_ir_channel=False):
     """
@@ -191,10 +265,6 @@ def validate_annotations(dataset, num_samples=5, show_ir_channel=False):
         for box, cls_id in zip(boxes, class_ids):
             # 反归一化坐标
             x1, y1, x2, y2 = box
-            x1 *= target_size[0]
-            y1 *= target_size[1]
-            x2 *= target_size[0]
-            y2 *= target_size[1]
             width = x2 - x1
             height = y2 - y1
 
@@ -235,11 +305,10 @@ def validate_annotations(dataset, num_samples=5, show_ir_channel=False):
         print(f"\n样本 {idx} 详细标注信息:")
         for i, (box, cls_id) in enumerate(zip(boxes, class_ids)):
             print(f"  目标 {i + 1}: {test_ClASS[cls_id]} (ID:{cls_id})")
-            print(f"    归一化坐标: x1={box[0]:.4f}, y1={box[1]:.4f}, x2={box[2]:.4f}, y2={box[3]:.4f}")
-            print(f"    像素坐标: x1={int(box[0] * target_size[0])}, y1={int(box[1] * target_size[1])}, "
-                  f"x2={int(box[2] * target_size[0])}, y2={int(box[3] * target_size[1])}")
+            print(f"    像素坐标: x1={int(box[0])}, y1={int(box[1])}, "
+                  f"x2={int(box[2])}, y2={int(box[3])}")
             print(
-                f"    框尺寸: {int((box[2] - box[0]) * target_size[0])}x{int((box[3] - box[1]) * target_size[1])} 像素")
+                f"    框尺寸: {int((box[2] - box[0]))}x{int((box[3] - box[1]))} 像素")
 
 
 # 使用示例
@@ -250,6 +319,5 @@ if __name__ == "__main__":
         image_vis_dir='../train/vis',
         label_dir='../train/label'
     )
-
     # 验证5个随机样本（显示红外通道）
     validate_annotations(dataset, num_samples=5, show_ir_channel=True)

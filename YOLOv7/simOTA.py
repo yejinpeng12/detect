@@ -1,5 +1,3 @@
-from ctypes import c_wchar
-
 import torch
 import torch.nn.functional as F
 from torchvision.ops.boxes import box_area
