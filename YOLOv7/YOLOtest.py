@@ -12,7 +12,11 @@ from basebone.ELANNet_Tiny import ELANNet_Tiny
 from tqdm import tqdm
 import sys
 import math
-
+from YOLOv8.basebone import Base_bone
+from YOLOv8.neck import PaFPN
+from yolov12.backbone import BackBone
+from  yolov12.neck import neck
+import os
 def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
     # Returns Intersection over Union (IoU) of box1(1,4) to box2(n,4)
 
@@ -57,9 +61,9 @@ class YOLO(nn.Module):
     def __init__(self,
                  device = "cuda",
                  num_classes=5,
-                 confidence_thresh=0.6,
-                 nms_thresh=0.5,
-                 topk=100,
+                 confidence_thresh=0.5,
+                 nms_thresh=0.2,
+                 topk=1000,
                  trainable=False,
                  depthwise = False):
         super().__init__()
@@ -70,7 +74,7 @@ class YOLO(nn.Module):
         self.num_classes = num_classes
         self.topk = topk
         self.trainable = trainable
-        #主干网络
+        # #主干网络
         self.backbone = ELANNet_Tiny(depthwise=False)
         self.neck_dims = self.backbone.feat_dims[-3:]
         #颈部网络
@@ -79,8 +83,17 @@ class YOLO(nn.Module):
         #颈部网络：特征金字塔
         self.fpn = YOLOv7PaFPN(self.neck_dims,None,depthwise=depthwise)
         self.head_dims = self.fpn.out_dim
+
+        # self.backbone = Base_bone()
+        # self.neck = PaFPN(self.backbone.feat_dim)
+        # self.head_dims = self.neck.out_dim
+
+        # self.backbone = BackBone()
+        # self.neck = neck(self.backbone.out_dim)
+        #
+        # self.head_dims = self.neck.out_dim
         #检测头
-        self.head = nn.ModuleList([DecoupledHead(head_dim,head_dim,num_classes=self.num_classes,depthwise=depthwise)
+        self.head = nn.ModuleList([DecoupledHead(head_dim,head_dim,num_classes=self.num_classes)
                                   for head_dim in self.head_dims])#这里产生了三个网格尺寸的检测头
 
         #预测层
@@ -109,6 +122,7 @@ class YOLO(nn.Module):
     def inference_single_image(self,x):
         x1 = self.backbone(x)
 
+        # x2 = self.neck(x1)
         x1[-1] = self.neck(x1[-1])
 
         x2 = self.fpn(x1)
@@ -153,6 +167,7 @@ class YOLO(nn.Module):
         else:
             x1 = self.backbone(x)
 
+            # x2 = self.neck(x1)
             x1[-1] = self.neck(x1[-1])
 
             x2 = self.fpn(x1)
@@ -349,13 +364,13 @@ def print_memory_usage():
 if __name__ == '__main__':
     model = YOLO(trainable=True,depthwise=True).cuda()
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(),lr = 0.001)
+    optimizer = torch.optim.Adam(model.parameters(),lr = 0.0001)
     criterion = Criterion("cuda",num_classes=5)
-    model.load_state_dict(torch.load('modelw14'))
+    #model.load_state_dict(torch.load('config/rotate5'))
     n_p = sum(x.numel() for x in model.parameters())
     print(n_p/(1024 ** 2))
     #梯度缩放器
-    scaler = GradScaler(init_scale=2.0**15,#降低初始缩放因子
+    scaler = GradScaler(init_scale=2.0**16,#降低初始缩放因子
                         growth_factor=2.0,#降低增长因子
                         backoff_factor=0.5#提高回退因子
                         )
@@ -375,7 +390,7 @@ if __name__ == '__main__':
                 collate_fn=collate_fn
             )
     #torch.autograd.set_detect_anomaly(True)
-    for epoch in range(15,100):
+    for epoch in range(0 ,100):
         for images,targets in tqdm(dataloader,file=sys.stdout,position=0,colour="green",desc=f"Epoch: {epoch}/99"):
             images = images.to("cuda")
             optimizer.zero_grad()
@@ -399,4 +414,4 @@ if __name__ == '__main__':
                 tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']},loss_box_aux:{loss_dict['loss_box_aux']}")
             else:
                 tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']}")
-        torch.save(model.state_dict(),f"modelw{epoch}")
+        torch.save(model.state_dict(),os.path.join("config",f"large{epoch}"))
