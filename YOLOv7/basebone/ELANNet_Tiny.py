@@ -1,6 +1,7 @@
 from torch import nn
 from YOLOv7.basebone.Conv import Conv
 from YOLOv7.basebone.ELANBlock import ELANBlock
+from YOLOv7.basic_block_v7.simAM_module import simam_module
 
 class ELANNet_Tiny(nn.Module):
     def __init__(self, act_type='silu', norm_type='BN', depthwise=False):
@@ -8,7 +9,7 @@ class ELANNet_Tiny(nn.Module):
         # -------------- Basic parameters --------------
         self.feat_dims = [32, 64, 128, 256, 512]
         #self.squeeze_ratios = [0.5, 0.5, 0.5, 0.5]  # Stage-1 -> Stage-4
-        self.squeeze_ratios = [1.0,1.0,1.0,1.0]#[1.0,1.0,1.0,0.5]
+        self.squeeze_ratios = [1.0,1.0,1.0,0.5]#[1.0,1.0,1.0,1.0]
         self.branch_depths = [2, 2, 2, 2]  # Stage-1 -> Stage-4
 
         # -------------- Network parameters --------------

@@ -136,7 +136,7 @@ def visualize_predictions(image_vis, bboxes, labels, scores, orig_size):
 
 if __name__ == "__main__":
     model = YOLO(trainable=False, depthwise=True).cuda()
-    model.load_state_dict(torch.load('config/rotate9'))#modelw25是mvp
+    model.load_state_dict(torch.load('config/simam69'))#modelw25是0.63,simam69是0.6608
 
     n_p = sum(x.numel() for x in model.parameters())
     print(f"{n_p:.2f}",end=' ')
@@ -147,7 +147,7 @@ if __name__ == "__main__":
     image_ir_dir = '../val2/ir'
     image_vis_dir = '../val2/vis'
     dataset = ImageDataset(image_ir_dir, image_vis_dir)
-    dataloader = DataLoader(dataset,batch_size=1,shuffle=False)
+    dataloader = DataLoader(dataset,batch_size=1,shuffle=True)
     with open('result1.txt','w') as f:
         f.write(f"{n_p} {flops_g}\n")
         for image,name,scale,wh,padding in dataloader:
@@ -169,10 +169,10 @@ if __name__ == "__main__":
                 print()
                 # 可视化预测结果
                 # 加载原始可见光图像
-                #orig_image_path = os.path.join(image_vis_dir, name[0])
-                #orig_image = Image.open(orig_image_path).convert('RGB')
+                orig_image_path = os.path.join(image_vis_dir, name[0])
+                orig_image = Image.open(orig_image_path).convert('RGB')
 
                 # 可视化
-                #visualize_predictions(orig_image, all_boxes, all_labels, scores,
-                #                  (wh[0].item(), wh[1].item()))
-                #break
+                visualize_predictions(orig_image, all_boxes, all_labels, scores,
+                                  (wh[0].item(), wh[1].item()))
+                break

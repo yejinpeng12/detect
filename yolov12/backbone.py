@@ -11,9 +11,9 @@ class BackBone(nn.Module):
         self.conv3 = Conv(c1=round(256 * width), c2=round(256 * width), k=3, s=2)
         self.c3k2_2 = C3k2(c1=round(256 * width), c2=round(512 * width), n=round(2 * depth), shortcut=False, e=0.25)
         self.conv4 = Conv(c1=round(512 * width), c2=round(512 * width), k=3, s=2)
-        self.a2c2f_1 = A2C2f(c1=round(512 * width), c2=round(512 * width), n=round(4 * depth), shortcut=True, area=4)
+        self.a2c2f_1 = A2C2f(c1=round(512 * width), c2=round(512 * width), n=round(4 * depth), a2=True, area=4)
         self.conv5 = Conv(c1=round(512 * width), c2=round(1024 * width), k=3, s=2)
-        self.a2c2f_2 = A2C2f(c1=round(1024 * width), c2=round(1024 * width), n=round(4 * depth), shortcut=True, area=1)
+        self.a2c2f_2 = A2C2f(c1=round(1024 * width), c2=round(1024 * width), n=round(4 * depth), a2=True, area=1)
     def forward(self, x):
         c0 = self.conv1(x)
         c1 = self.conv2(c0)

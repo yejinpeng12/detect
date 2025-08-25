@@ -4,8 +4,10 @@ from torch import nn
 from YOLOv7.basebone.Downsample import Downsample
 import torch.nn.functional as F
 import torch
+from YOLOv7.basic_block_v7.simAM_module import simam_module
+
 class YOLOv7PaFPN(nn.Module):
-    def __init__(self,in_dims,out_dim,channel_width = 1.0,norm_type='BN',act_type='silu',depthwise=False):
+    def __init__(self,in_dims,out_dim,channel_width = 0.5,norm_type='BN',act_type='silu',depthwise=False):
         super().__init__()#0.5
         self.in_dims = in_dims
         self.channel_width = channel_width
@@ -18,12 +20,15 @@ class YOLOv7PaFPN(nn.Module):
         self.reduce_layer_3 = Conv(round(256*channel_width),  round(128*channel_width), k=1, norm_type=norm_type,act_type=act_type)
         self.reduce_layer_4 = Conv(c3,  round(128*channel_width), k=1, norm_type=norm_type,act_type=act_type)
         self.top_down_layer_2 = ELANBlockFPN(in_dim=round(128*channel_width) + round(128*channel_width),out_dim=round(128*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.simam_1 = simam_module()
 
         self.downsample_layer_1 = Downsample(in_dim=round(128*channel_width),out_dim=round(256*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
         self.bottom_up_layer_1 = ELANBlockFPN(in_dim=round(256*channel_width) + round(256*channel_width),out_dim=round(256*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.simam_2 = simam_module()
 
         self.downsample_layer_2 = Downsample(in_dim=round(256*channel_width),out_dim= round(512*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
         self.bottom_up_layer_2 = ELANBlockFPN(in_dim=round(512*channel_width)+c5,out_dim=round(512*channel_width),norm_type=norm_type,act_type=act_type,depthwise=depthwise)
+        self.simam_3 = simam_module()
 
         self.head_conv_1 = Conv(round(128*channel_width), round(256*channel_width),k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=False)
         self.head_conv_2 = Conv(round(256*channel_width), round(512*channel_width),k=3,p=1,norm_type=norm_type,act_type=act_type,depthwise=False)
@@ -48,15 +53,15 @@ class YOLOv7PaFPN(nn.Module):
         c10 = self.reduce_layer_3(c9)
         c11 = F.interpolate(c10,scale_factor=2.0)
         c12 = torch.cat([self.reduce_layer_4(c3),c11],dim=1)
-        c13 = self.top_down_layer_2(c12)
+        c13 = self.simam_1(self.top_down_layer_2(c12))
 
         c14 = self.downsample_layer_1(c13)
         c15 = torch.cat([c9,c14],dim=1)
-        c16 = self.bottom_up_layer_1(c15)
+        c16 = self.simam_2(self.bottom_up_layer_1(c15))
 
         c17 = self.downsample_layer_2(c16)
         c18 = torch.cat([c5,c17],dim=1)
-        c19 = self.bottom_up_layer_2(c18)
+        c19 = self.simam_3(self.bottom_up_layer_2(c18))
 
         c20 = self.head_conv_1(c13)
         c21 = self.head_conv_2(c16)

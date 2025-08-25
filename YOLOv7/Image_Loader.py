@@ -276,7 +276,7 @@ def validate_annotations(dataset, num_samples=5, show_ir_channel=False):
             # 绘制边界框
             rect = patches.Rectangle(
                 (x1, y1), width, height,
-                linewidth=2, edgecolor='lime', facecolor='none'
+                linewidth=1, edgecolor='lime', facecolor='none'
             )
             ax.add_patch(rect)
 
@@ -284,7 +284,7 @@ def validate_annotations(dataset, num_samples=5, show_ir_channel=False):
             label = test_ClASS[cls_id]
             ax.text(
                 x1, y1 - 5, f"{label} (ID:{cls_id})",
-                color='lime', fontsize=12, weight='bold',
+                color='lime', fontsize=6, weight='bold',
                 bbox=dict(facecolor='black', alpha=0.5, pad=1)
             )
 

@@ -17,6 +17,8 @@ from YOLOv8.neck import PaFPN
 from yolov12.backbone import BackBone
 from  yolov12.neck import neck
 import os
+from YOLOv7.basic_block_v7.simAM_module import simam_module
+
 def bbox_iou(box1, box2, xywh=True, GIoU=False, DIoU=False, CIoU=False, eps=1e-7):
     # Returns Intersection over Union (IoU) of box1(1,4) to box2(n,4)
 
@@ -61,7 +63,7 @@ class YOLO(nn.Module):
     def __init__(self,
                  device = "cuda",
                  num_classes=5,
-                 confidence_thresh=0.5,
+                 confidence_thresh=0.6,
                  nms_thresh=0.2,
                  topk=1000,
                  trainable=False,
@@ -84,6 +86,8 @@ class YOLO(nn.Module):
         self.fpn = YOLOv7PaFPN(self.neck_dims,None,depthwise=depthwise)
         self.head_dims = self.fpn.out_dim
 
+        self.simam = simam_module()
+
         # self.backbone = Base_bone()
         # self.neck = PaFPN(self.backbone.feat_dim)
         # self.head_dims = self.neck.out_dim
@@ -93,7 +97,7 @@ class YOLO(nn.Module):
         #
         # self.head_dims = self.neck.out_dim
         #检测头
-        self.head = nn.ModuleList([DecoupledHead(head_dim,head_dim,num_classes=self.num_classes)
+        self.head = nn.ModuleList([DecoupledHead(head_dim,head_dim,num_classes=self.num_classes,depthwise=depthwise)
                                   for head_dim in self.head_dims])#这里产生了三个网格尺寸的检测头
 
         #预测层
@@ -122,8 +126,8 @@ class YOLO(nn.Module):
     def inference_single_image(self,x):
         x1 = self.backbone(x)
 
-        # x2 = self.neck(x1)
-        x1[-1] = self.neck(x1[-1])
+        #x2 = self.neck(x1)
+        x1[-1] = self.simam(self.neck(x1[-1]))
 
         x2 = self.fpn(x1)
 
@@ -167,8 +171,8 @@ class YOLO(nn.Module):
         else:
             x1 = self.backbone(x)
 
-            # x2 = self.neck(x1)
-            x1[-1] = self.neck(x1[-1])
+            #x2 = self.neck(x1)
+            x1[-1] = self.simam(self.neck(x1[-1]))
 
             x2 = self.fpn(x1)
 
@@ -252,12 +256,15 @@ class YOLO(nn.Module):
     def nms(self,bounding_box,scores):
         """
         只保留得分最高的边界框，并移除与其重叠度较高的其他边框（针对单个类别）
+        :param bounding_box:[13*13,4]
+        :param scores:[13*13,1]
+        :return:
         """
-        # x1 = bounding_box[:,0]
-        # y1 = bounding_box[:,1]
-        # x2 = bounding_box[:,2]
-        # y2 = bounding_box[:,3]
-        # areas = (x2 - x1) * (y2 - y1)
+        x1 = bounding_box[:,0]
+        y1 = bounding_box[:,1]
+        x2 = bounding_box[:,2]
+        y2 = bounding_box[:,3]
+        areas = (x2 - x1) * (y2 - y1)
         #将得分进行排序，得分最大的索引值放在最前面,[::-1]表示反转数列
         order = scores.argsort()[::-1]
         keep = []
@@ -270,35 +277,22 @@ class YOLO(nn.Module):
             #[::-1]表示反转序列顺序
             i = order[0]
             keep.append(i)
-            # #计算交集的左上角点和右下角点的坐标
-            # #maximum是比较取值，去最大的作为返回值，如果是数与数组比较，则返回数组，数组中比数小的被数取代
-            # xx1 = np.maximum(x1[i],x1[order[1:]])
-            # yy1 = np.maximum(y1[i],y1[order[1:]])
-            # xx2 = np.minimum(x2[i],x2[order[1:]])
-            # yy2 = np.minimum(y2[i],y2[order[1:]])
-            # #计算交集的宽和高
-            # w = np.maximum(1e-10,xx2-xx1)
-            # h = np.maximum(1e-10,yy2-yy1)
-            # #计算交集的面积
-            # inter = w * h
-            # union_area = areas[i] +areas[order[1:]] - inter + 1e-14
-            # #计算交并比
-            # iou = inter / union_area
-            # encl_x1 = np.minimum(x1[i],x1[order[1:]])
-            # encl_y1 = np.minimum(y1[i],y1[order[1:]])
-            # encl_x2 = np.maximum(x2[i],x2[order[1:]])
-            # encl_y2 = np.maximum(y2[i],y2[order[1:]])
-            # encl_w = encl_x2 - encl_x1
-            # encl_h = encl_y2 - encl_y1
-            # encl_area = encl_w * encl_h
-            # giou = iou - (encl_area - union_area) / (encl_area + 1e-10)
-            current_box = bounding_box[i].reshape(1,4)
-            other_boxes = bounding_box[order[1:]]
-            ciou = bbox_iou(torch.tensor(current_box),torch.tensor(other_boxes),xywh=False,CIoU=True)
-            ciou = ciou.cpu().numpy()
+            #计算交集的左上角点和右下角点的坐标
+            #maximum是比较取值，去最大的作为返回值，如果是数与数组比较，则返回数组，数组中比数小的被数取代
+            xx1 = np.maximum(x1[i],x1[order[1:]])
+            yy1 = np.maximum(y1[i],y1[order[1:]])
+            xx2 = np.minimum(x2[i],x2[order[1:]])
+            yy2 = np.minimum(y2[i],y2[order[1:]])
+            #计算交集的宽和高
+            w = np.maximum(1e-10,xx2-xx1)
+            h = np.maximum(1e-10,yy2-yy1)
+            #计算交集的面积
+            inter = w * h
+            #计算交并比
+            iou = inter/ (areas[i] +areas[order[1:]] - inter)
             #滤除超过NMS阈值的边界框
             #np.where返回一个元组，元组的第一个元素是符合条件的索引值列表
-            inds = np.where(ciou <= self.nms_thresh)[0]
+            inds = np.where(iou <= self.nms_thresh)[0]
             order = order[inds + 1]#将符合条件的边界框取下来继续选，
             # 为什么加一，是因为iou是除了第一个边界框以外的数组，相比order只少了第一个边界框，加了一后便能把符合条件的索引值全部拿走，丢掉不符合条件的
         return keep
@@ -364,9 +358,9 @@ def print_memory_usage():
 if __name__ == '__main__':
     model = YOLO(trainable=True,depthwise=True).cuda()
     model.train()
-    optimizer = torch.optim.Adam(model.parameters(),lr = 0.0001)
-    criterion = Criterion("cuda",num_classes=5)
-    #model.load_state_dict(torch.load('config/rotate5'))
+    optimizer = torch.optim.Adam(model.parameters(), lr = 0.00001)#1e-7
+    criterion = Criterion("cuda", num_classes=5)
+    model.load_state_dict(torch.load('config/simam78'))
     n_p = sum(x.numel() for x in model.parameters())
     print(n_p/(1024 ** 2))
     #梯度缩放器
@@ -390,7 +384,8 @@ if __name__ == '__main__':
                 collate_fn=collate_fn
             )
     #torch.autograd.set_detect_anomaly(True)
-    for epoch in range(0 ,100):
+    for epoch in range(79 ,100):
+        total_loss = 0
         for images,targets in tqdm(dataloader,file=sys.stdout,position=0,colour="green",desc=f"Epoch: {epoch}/99"):
             images = images.to("cuda")
             optimizer.zero_grad()
@@ -399,6 +394,7 @@ if __name__ == '__main__':
                 preds = model(images)
                 loss_dict = criterion(preds,targets,epoch)
                 losses = loss_dict['losses']
+                total_loss += losses
                 #print_memory_usage()
             #缩放损失并反向传播
             scaler.scale(losses).backward()
@@ -414,4 +410,6 @@ if __name__ == '__main__':
                 tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']},loss_box_aux:{loss_dict['loss_box_aux']}")
             else:
                 tqdm.write(f"Loss: {loss_dict['losses']},Loss_obj:{loss_dict['loss_obj']},Loss_cls:{loss_dict['loss_cls']},Loss_box:{loss_dict['loss_box']}")
-        torch.save(model.state_dict(),os.path.join("config",f"large{epoch}"))
+        with open('loss.txt', 'a') as f:
+            f.write(f"{epoch}_total_mean_loss{total_loss / 6250}\n")
+        torch.save(model.state_dict(),os.path.join("config",f"simam{epoch}"))
