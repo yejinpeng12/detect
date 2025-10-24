@@ -1,8 +1,11 @@
+from tqdm import tqdm
 from torchvision.datasets import FashionMNIST, CIFAR100
 from torchvision import transforms
 import torch.utils.data as Data
+import sys
 import numpy as np
 import matplotlib.pyplot as plt
+from torch.amp import autocast,GradScaler
 import torch
 import copy
 import time
@@ -13,15 +16,33 @@ from ResNet import ResNet, Residual
 from NiN import NiN
 from DenseNet import DenseNet
 from SENet import SENet, SEResidual, SELayer
-
+from vit_model import *
 
 def train_val_data_process(datasets):
     train_data = datasets(root='./data1',
                           train=True,
-                          transform=transforms.Compose([transforms.Resize(size=128), transforms.ToTensor()]),
+                          transform=transforms.Compose([transforms.Resize(size=224),
+                                                        transforms.ToTensor(),
+                                                        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                                             std=[0.229, 0.224, 0.225]),
+                                                        transforms.RandomHorizontalFlip(),
+                                                        transforms.RandomErasing(scale=(0.04, 0.2),
+                                                                                 ratio=(0.5, 2),),
+                                                        transforms.RandomCrop(224,128),
+                                                        ]),
+
                           download=True)
 
-    train_data, val_data = Data.random_split(train_data, [round(0.8*len(train_data)), round(0.2*len(train_data))])
+    #train_data, val_data = Data.random_split(train_data, [round(0.8*len(train_data)), round(0.2*len(train_data))])
+
+    val_data = datasets(root='./data1',
+                          train=False,
+                          transform=transforms.Compose([transforms.Resize(size=224),
+                                                        transforms.ToTensor(),
+                                                        transforms.Normalize(mean=[0.485, 0.456, 0.406],
+                                                                             std=[0.229, 0.224, 0.225]),
+                                                        ]),
+                          download=True)
 
     train_dataloader = Data.DataLoader(dataset=train_data,
                                        batch_size=16,
@@ -36,12 +57,13 @@ def train_val_data_process(datasets):
     return train_dataloader, val_dataloader
 
 def train_model_process(model, train_dataloader, val_dataloader, num_epochs):
-    optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
-
+    scaler = GradScaler()
+    optimizer = torch.optim.AdamW(model.parameters(), lr=0.001, weight_decay=1e-4)
+    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, 'min')#学习率衰减
     criterion = torch.nn.CrossEntropyLoss()
 
     model = model.to('cuda')
-
+    #model.load_state_dict(torch.load("cfg/best_model.pth"))
     best_model_wts = copy.deepcopy(model.state_dict())
 
     best_acc = 0.0
@@ -52,8 +74,8 @@ def train_model_process(model, train_dataloader, val_dataloader, num_epochs):
     #当前时间
     since = time.time()
 
-    for epoch in range(num_epochs):
-        print("Epoch {}/{}".format(epoch, num_epochs-1))
+    for epoch in range(1, num_epochs+1):
+        print("Epoch {}/{}".format(epoch, num_epochs))
         print("-"*10)
 
         train_loss = 0.0
@@ -65,29 +87,31 @@ def train_model_process(model, train_dataloader, val_dataloader, num_epochs):
         train_num = 0.0
         val_num = 0.0
 
-        for step, (b_x, b_y) in enumerate(train_dataloader):
+        for (b_x, b_y) in tqdm(train_dataloader, file=sys.stdout, position=0, colour="green", desc=f"train Epoch: {epoch}/{num_epochs} lr: {optimizer.param_groups[0]['lr']}"):
             b_x = b_x.to("cuda")
             b_y = b_y.to("cuda")
 
             model.train()
+            optimizer.zero_grad(set_to_none=True)
+            with autocast("cuda", enabled=True, dtype=torch.float16):
+                output = model(b_x)
 
-            output = model(b_x)
+                pre_lab = torch.argmax(output, 1)
 
-            pre_lab = torch.argmax(output, 1)
+                loss = criterion(output, b_y)
 
-            loss = criterion(output, b_y)
+            scaler.scale(loss).backward()
+            scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+            scaler.step(optimizer)
+            scaler.update()
 
-            optimizer.zero_grad()
-
-            loss.backward()
-
-            optimizer.step()
 
             train_loss += loss.item() * b_x.size(0)
             train_accuracy += torch.sum(pre_lab == b_y.data)
             train_num += b_x.size(0)
 
-        for step, (b_x, b_y) in enumerate(val_dataloader):
+        for (b_x, b_y) in tqdm(val_dataloader, file=sys.stdout, position=0, colour="green", desc=f"val Epoch: {epoch}/{num_epochs}"):
             b_x = b_x.to('cuda')
             b_y = b_y.to('cuda')
             model.eval()
@@ -102,7 +126,7 @@ def train_model_process(model, train_dataloader, val_dataloader, num_epochs):
         val_loss_all.append(val_loss / val_num)
         train_acc_all.append(train_accuracy.double().item() / train_num)
         val_acc_all.append(val_accuracy.double().item() / val_num)
-
+        scheduler.step(train_loss_all[-1])
         print('{} Train Loss: {:.4f} train acc: {:.4f}'.format(epoch, train_loss_all[-1], train_acc_all[-1]))
         print('{} Val loss: {:.4f} val acc: {:.4f}'.format(epoch, val_loss_all[-1], val_acc_all[-1]))
 
@@ -114,7 +138,7 @@ def train_model_process(model, train_dataloader, val_dataloader, num_epochs):
         print("训练和验证耗费的时间{:.0f}m{:.0f}".format(time_use//60, time_use%60))
 
     model.load_state_dict(best_model_wts)
-    torch.save(model.load_state_dict(best_model_wts), 'cfg/best_model.pth')
+    torch.save(model.state_dict(), 'cfg/best_model.pth')
 
     train_process = pd.DataFrame(data={"epoch":range(num_epochs),
                                         "train_loss_all":train_loss_all,
@@ -141,7 +165,7 @@ def matplot_acc_loss(train_process):
     plt.show()
 
 if __name__ == "__main__":
-    model = DenseNet([4, 4, 4,4], 64, 32)
+    model = DenseNet([4, 4, 4, 4], 64, 32)
     train_dataloader, val_dataloader = train_val_data_process(CIFAR100)
-    train_process = train_model_process(model, train_dataloader, val_dataloader, 50)
+    train_process = train_model_process(model, train_dataloader, val_dataloader, 200)
     matplot_acc_loss(train_process)

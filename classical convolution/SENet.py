@@ -29,7 +29,7 @@ class SENet(nn.Module):
     def __init__(self, Residual):
         super().__init__()
         self.block1 = nn.Sequential(
-            nn.Conv2d(3, 64, 7, 2, 3),
+            nn.Conv2d(3, 64, 7, 2, 3, bias=False),
             nn.BatchNorm2d(64),
             nn.ReLU(),
             nn.MaxPool2d(3, 2, 1)
@@ -73,8 +73,8 @@ class SENet(nn.Module):
 class SEResidual(nn.Module):
     def __init__(self, input_channels, output_channels, use_1conv=False, stride=1):
         super().__init__()
-        self.conv1 = nn.Conv2d(input_channels, output_channels, 3, stride, 1)
-        self.conv2 = nn.Conv2d(output_channels, output_channels, 3, 1, 1)
+        self.conv1 = nn.Conv2d(input_channels, output_channels, 3, stride, 1, bias=False)
+        self.conv2 = nn.Conv2d(output_channels, output_channels, 3, 1, 1, bias=False)
         self.bn1 = nn.BatchNorm2d(output_channels)
         self.bn2 = nn.BatchNorm2d(output_channels)
 
